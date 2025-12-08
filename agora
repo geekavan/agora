@@ -2,9 +2,15 @@
 # Agora AI Council - 全局命令
 # 可以在任何目录运行，自动使用当前目录作为项目路径
 
-# 脚本实际位置（自动检测）
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-AGORA_HOME="$SCRIPT_DIR"
+# 脚本实际位置（支持符号链接）
+SOURCE="${BASH_SOURCE[0]}"
+# 解析符号链接，找到真实的脚本路径
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+AGORA_HOME="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 
 # 默认使用当前工作目录作为项目路径
 PROJECT_PATH="$(pwd)"
