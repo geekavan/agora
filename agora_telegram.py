@@ -29,17 +29,10 @@ from telegram.request import HTTPXRequest
 # 加载 .env 文件
 try:
     from dotenv import load_dotenv
-    # 尝试从当前目录或上级目录加载 .env 文件
-    dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
-    if not os.path.exists(dotenv_path):
-        dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
-    load_dotenv(dotenv_path=dotenv_path, verbose=True)
-    logger.info(f"Loaded .env from: {dotenv_path}")
+    load_dotenv()  # 自动查找并加载 .env 文件
 except ImportError:
-    logger.warning("⚠️ python-dotenv 未安装，请安装: pip install python-dotenv")
-    logger.warning("或手动设置 TELEGRAM_BOT_TOKEN 等环境变量。")
-except Exception as e:
-    logger.error(f"Error loading .env: {e}")
+    print("⚠️  python-dotenv 未安装，使用系统环境变量")
+    print("   安装方法: pip install python-dotenv")
 
 
 # ============= 配置区域 =============
