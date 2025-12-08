@@ -362,8 +362,10 @@ def build_discussion_prompt(
 
 def process_ai_response(response: str) -> Tuple[str, List[Tuple[str, str]]]:
     """处理AI响应，提取文件操作和显示文本"""
-    # 修复的正则：正确转义引号
-    file_pattern = r'<WRITE_FILE path=["'](.*?)["']>(.*?)</WRITE_FILE>'
+    # 匹配格式: <WRITE_FILE path="filepath">content</WRITE_FILE>
+    # Group 1: 文件路径
+    # Group 2: 文件内容
+    file_pattern = r'<WRITE_FILE path=[\'"](.*?)[\'"]>(.*?)</WRITE_FILE>'
     file_matches = re.findall(file_pattern, response, re.DOTALL)
 
     display_text = re.sub(
