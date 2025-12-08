@@ -25,6 +25,7 @@ from telegram.ext import (
     CallbackQueryHandler
 )
 from telegram.request import HTTPXRequest
+from telegram.helpers import escape_markdown
 
 # 加载 .env 文件
 try:
@@ -371,6 +372,15 @@ def process_ai_response(response: str) -> Tuple[str, List[Tuple[str, str]]]:
     return display_text, file_matches
 
 
+# 统一的Markdown转义
+def md_escape(text: str) -> str:
+    """对动态内容进行Markdown转义，避免Telegram解析错误"""
+    try:
+        return escape_markdown(text, version=1)
+    except Exception:
+        return text
+
+
 # ============= 讨论功能 =============
 
 async def run_roundtable_discussion(
@@ -393,7 +403,7 @@ async def run_roundtable_discussion(
 
     await update.message.reply_text(
         f"🎯 **圆桌讨论开始**\n\n"
-        f"📋 议题: {topic}\n"
+        f"📋 议题: {md_escape(topic)}\n"
         f"👥 参与者: {', '.join(AGENTS.keys())}\n\n"
         f"三位AI将依次发言...",
         parse_mode='Markdown'
@@ -419,11 +429,11 @@ async def run_roundtable_discussion(
                 discussion.add_message(agent, response, vote)
                 display_text, file_matches = process_ai_response(response)
 
-                vote_display = f"\n\n📊 投票: `{vote}`" if vote != "pending" else ""
+                vote_display = f"\n\n📊 投票: {md_escape(vote)}" if vote != "pending" else ""
                 await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=thinking_msg.message_id,
-                    text=f"{emoji} **[{agent}]**:\n\n{display_text}{vote_display}",
+                    text=f"{emoji} **[{md_escape(agent)}]**:\n\n{md_escape(display_text)}{vote_display}",
                     parse_mode='Markdown'
                 )
 
@@ -441,7 +451,10 @@ async def run_roundtable_discussion(
         consensus, decision = check_consensus(discussion)
         if consensus:
             discussion.consensus_reached = True
-            await update.message.reply_text(f"✅ **讨论结束：达成共识！**\n\n最终决策: {decision}", parse_mode='Markdown')
+            await update.message.reply_text(
+                f"✅ **讨论结束：达成共识！**\n\n最终决策: {md_escape(decision)}",
+                parse_mode='Markdown'
+            )
             del active_discussions[chat_id]
             return
 
@@ -469,7 +482,7 @@ async def handle_file_write_requests(
         if len(content.splitlines()) > 8: preview += "\n..."
 
         await update.message.reply_text(
-            f"📝 **File Write Request**\nFile: `{file_path}`\n```\n{preview}\n```",
+            f"📝 **File Write Request**\nFile: `{md_escape(file_path)}`\n```\n{md_escape(preview)}\n```",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
@@ -500,7 +513,7 @@ async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_ls(update: Update, context: ContextTypes.DEFAULT_TYPE):
     files = subprocess.getoutput("ls -F")
-    await update.message.reply_text(f"📂 **Files:**\n```\n{files}\n```", parse_mode='Markdown')
+    await update.message.reply_text(f"📂 **Files:**\n```\n{md_escape(files)}\n```", parse_mode='Markdown')
 
 async def smart_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text: return
@@ -527,7 +540,12 @@ async def call_single_agent(update, context, agent, prompt):
     
     try:
         role = AGENTS[agent]["role"]
-        full_prompt = f"You are {agent} ({role}). Keep concise.\n\nUser: {prompt}"
+        full_prompt = (
+            f"You are {agent} ({role}).\n"
+            "If you need to write a file, use the format: <WRITE_FILE path=\"path/to/file\">file content</WRITE_FILE>\n"
+            "Keep concise.\n\n"
+            f"User: {prompt}"
+        )
         
         loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(None, run_agent_cli, agent, full_prompt)
@@ -537,7 +555,7 @@ async def call_single_agent(update, context, agent, prompt):
         await context.bot.edit_message_text(
             chat_id=update.effective_chat.id,
             message_id=status_msg.message_id,
-            text=f"{emoji} **[{agent}]**:\n\n{display_text}",
+            text=f"{emoji} **[{md_escape(agent)}]**:\n\n{md_escape(display_text)}",
             parse_mode='Markdown'
         )
         
@@ -567,7 +585,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 if not abs_path.startswith(abs_project_root):
                     await query.edit_message_text(
-                        text=f"❌ **安全错误**: 路径 `{info['path']}` 超出项目目录范围",
+                        text=f"❌ **安全错误**: 路径 `{md_escape(info['path'])}` 超出项目目录范围",
                         parse_mode='Markdown'
                     )
                     return
@@ -577,13 +595,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 with open(abs_path, 'w', encoding='utf-8') as f: f.write(info["content"])
                 await query.edit_message_text(
-                    text=f"✅ **成功**: 文件 `{info['path']}` 已写入。",
+                    text=f"✅ **成功**: 文件 `{md_escape(info['path'])}` 已写入。",
                     parse_mode='Markdown'
                 )
             except Exception as e:
                 logger.error(f"Failed to write file {info['path']}: {e}")
                 await query.edit_message_text(
-                    text=f"❌ **错误**: 写入 `{info['path']}` 失败: {e}",
+                    text=f"❌ **错误**: 写入 `{md_escape(info['path'])}` 失败: {md_escape(str(e))}",
                     parse_mode='Markdown'
                 )
         else:
