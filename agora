@@ -1,0 +1,92 @@
+#!/bin/bash
+# Agora AI Council - 全局命令
+# 可以在任何目录运行，自动使用当前目录作为项目路径
+
+# 脚本实际位置（自动检测）
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AGORA_HOME="$SCRIPT_DIR"
+
+# 默认使用当前工作目录作为项目路径
+PROJECT_PATH="$(pwd)"
+CUSTOM_PATH=""
+
+# 解析命令行参数
+while getopts "p:h" opt; do
+  case $opt in
+    p)
+      CUSTOM_PATH="$OPTARG"
+      PROJECT_PATH="$OPTARG"
+      ;;
+    h)
+      echo "Agora - AI圆桌会议系统"
+      echo ""
+      echo "用法: agora [-p 项目路径]"
+      echo ""
+      echo "选项:"
+      echo "  -p PATH    指定项目路径（默认：当前目录）"
+      echo "  -h         显示帮助"
+      echo ""
+      echo "示例:"
+      echo "  agora                           # 使用当前目录"
+      echo "  cd /path/to/project && agora    # 在项目目录运行"
+      echo "  agora -p /path/to/project       # 指定路径"
+      echo ""
+      echo "当前目录: $(pwd)"
+      echo "Agora安装目录: $AGORA_HOME"
+      exit 0
+      ;;
+    \?)
+      echo "无效选项: -$OPTARG" >&2
+      echo "使用 -h 查看帮助"
+      exit 1
+      ;;
+  esac
+done
+
+echo "🤖 Agora AI Council"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# 检查 .env 文件
+if [ ! -f "$AGORA_HOME/.env" ]; then
+    echo "❌ 错误: .env 文件不存在！"
+    echo "   路径: $AGORA_HOME/.env"
+    echo "   请先配置 Telegram Bot Token"
+    exit 1
+fi
+
+# 检查 Python 脚本
+if [ ! -f "$AGORA_HOME/agora_telegram.py" ]; then
+    echo "❌ 错误: agora_telegram.py 不存在！"
+    echo "   路径: $AGORA_HOME/agora_telegram.py"
+    exit 1
+fi
+
+# 检查 python-dotenv
+python3 -c "import dotenv" 2>/dev/null
+if [ $? -ne 0 ]; then
+    echo "⚠️  python-dotenv 未安装，正在安装..."
+    pip3 install python-dotenv >/dev/null 2>&1
+fi
+
+# 显示项目路径
+if [ -n "$CUSTOM_PATH" ]; then
+    echo "📁 项目路径: $PROJECT_PATH (指定)"
+else
+    echo "📁 项目路径: $PROJECT_PATH (当前目录)"
+fi
+
+# 检查项目路径是否存在
+if [ ! -d "$PROJECT_PATH" ]; then
+    echo "⚠️  警告: 项目路径不存在: $PROJECT_PATH"
+    echo "   Bot仍会启动，但AI无法读取项目文件"
+fi
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# 设置项目路径环境变量
+export PROJECT_ROOT="$PROJECT_PATH"
+
+# 切换到 Agora 目录并启动
+cd "$AGORA_HOME"
+python3 agora_telegram.py
