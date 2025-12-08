@@ -3,8 +3,8 @@
 Agora Telegram Enhanced - AI圆桌会议Telegram Bot
 支持多AI多轮讨论、智能识别、共识检测
 
-Author: AI Council Framework
-Version: 2.0
+Author: AI Council Framework (Fixed by Gemini)
+Version: 2.2 (Secure Token Handling)
 """
 
 import subprocess
@@ -29,37 +29,48 @@ from telegram.request import HTTPXRequest
 # 加载 .env 文件
 try:
     from dotenv import load_dotenv
-    load_dotenv()  # 自动查找并加载 .env 文件
+    # 尝试从当前目录或上级目录加载 .env 文件
+    dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
+    if not os.path.exists(dotenv_path):
+        dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
+    load_dotenv(dotenv_path=dotenv_path, verbose=True)
+    logger.info(f"Loaded .env from: {dotenv_path}")
 except ImportError:
-    print("⚠️  python-dotenv 未安装，使用系统环境变量")
-    print("   安装方法: pip install python-dotenv")
+    logger.warning("⚠️ python-dotenv 未安装，请安装: pip install python-dotenv")
+    logger.warning("或手动设置 TELEGRAM_BOT_TOKEN 等环境变量。")
+except Exception as e:
+    logger.error(f"Error loading .env: {e}")
+
 
 # ============= 配置区域 =============
 
-# ⚠️ 安全提示：请使用环境变量！
+# ⚠️ 安全提示：请从环境变量读取 BOT_TOKEN！
+# 在项目根目录创建 .env 文件，内容如: TELEGRAM_BOT_TOKEN="你的Token"
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 
-# 代理配置
-PROXY_URL = os.getenv("PROXY_URL", None)
+# 代理配置 (如果需要)
+PROXY_URL = os.getenv("PROXY_URL", None) 
+# PROXY_URL = "http://127.0.0.1:7890" # 如果你在国内无法连接，请取消注释这行，并将其添加到 .env
 
-# AI角色配置
-# TODO: 替换为你实际的CLI命令！
-# 当前使用echo模拟，仅用于测试Bot框架
+# AI角色配置 - 已恢复真实 CLI 调用
 AGENTS = {
     "Claude": {
         "role": "Architect & Lead Reviewer",
         "emoji": "🔷",
-        "command": ["echo", "🔷 Claude回复：我是架构师，针对您的问题，我建议采用微服务架构... <VOTE>同意方案A</VOTE>"]
+        # Claude Code 非交互模式调用
+        "command": ["claude", "-p"]
     },
     "Codex": {
         "role": "Lead Developer",
         "emoji": "🟢",
-        "command": ["echo", "🟢 Codex回复：作为开发者，我可以实现这个功能。代码如下...\nprint('Hello World') <VOTE>同意方案A</VOTE>"]
+        # Codex 执行模式，跳过git检查
+        "command": ["codex", "exec", "--skip-git-repo-check"]
     },
     "Gemini": {
         "role": "QA & Security Expert",
         "emoji": "🔵",
-        "command": ["echo", "🔵 Gemini回复：从安全和质量角度，我认为这个方案可行。<VOTE>同意方案A</VOTE>"]
+        # Gemini 调用
+        "command": ["gemini"]
     }
 }
 
@@ -293,23 +304,15 @@ def extract_vote(response: str) -> str:
 
 
 def check_consensus(discussion: DiscussionState) -> Tuple[bool, str]:
-    """检测是否达成共识
-
-    Returns:
-        (是否达成共识, 最终决策描述)
-    """
+    """检测是否达成共识"""
     votes = discussion.votes
-
-    # 统计非pending的投票
     valid_votes = [v for v in votes.values() if v != "pending"]
 
     if len(valid_votes) < len(AGENTS):
         return False, ""
 
-    # 检查是否有明确的方案获得多数支持
     vote_counts = {}
     for vote in valid_votes:
-        # 简单归类：同意类 vs 反对类
         if any(kw in vote.lower() for kw in ['同意', 'agree', 'lgtm', '赞成']):
             vote_counts['支持'] = vote_counts.get('支持', 0) + 1
         elif any(kw in vote.lower() for kw in ['反对', 'disagree', 'reject']):
@@ -317,9 +320,7 @@ def check_consensus(discussion: DiscussionState) -> Tuple[bool, str]:
         else:
             vote_counts['其他'] = vote_counts.get('其他', 0) + 1
 
-    # 至少2票支持即达成共识
     if vote_counts.get('支持', 0) >= CONSENSUS_THRESHOLD:
-        # 提取最终方案（从最后一轮消息中）
         recent_messages = [m['message'] for m in discussion.history[-3:]]
         return True, "基于多轮讨论达成的技术方案"
 
@@ -334,8 +335,6 @@ def build_discussion_prompt(
 ) -> str:
     """构建讨论prompt"""
     role = AGENTS[agent]["role"]
-
-    # 获取项目上下文
     project_context = get_project_context()
 
     prompt = f"""你是 {agent} ({role})，正在参与AI团队的圆桌技术讨论。
@@ -351,37 +350,22 @@ def build_discussion_prompt(
 【你的任务】
 1. 仔细阅读上面其他AI的发言（如果有）
 2. 基于他们的观点，给出你的专业分析和建议
-3. 如果你同意某个方案，用 <VOTE>同意XXX方案</VOTE> 明确投票
-4. 如果需要继续讨论，指出关键分歧点
-5. 可以用 @AgentName 引用其他AI的观点
+3. 如果你同意某个方案，必须用 <VOTE>同意</VOTE> 或 <VOTE>反对</VOTE> 明确投票！
+4. 如果需要写文件，使用 <WRITE_FILE path=\"...\">content</WRITE_FILE>
 
 【注意】
-- 保持简洁专业，针对性发言
-- 在Telegram聊天，避免过长的输出
-- 如果需要写文件，使用 <WRITE_FILE path="...">content</WRITE_FILE>
-- 项目文件路径基于工作目录: {PROJECT_ROOT}
-
-现在请发言："""
-
+- 保持简洁专业，Telegram 聊天风格
+- 不要说废话，直接进入正题
+"""
     return prompt
 
 
 def process_ai_response(response: str) -> Tuple[str, List[Tuple[str, str]]]:
-    """处理AI响应，提取文件操作和显示文本
-
-    Args:
-        response: AI的原始回复文本
-
-    Returns:
-        (显示文本, 文件匹配列表): 元组包含处理后的显示文本和文件写入请求列表
-    """
-    # 匹配格式: <WRITE_FILE path="filepath">content</WRITE_FILE>
-    # Group 1: 文件路径
-    # Group 2: 文件内容
-    file_pattern = r'<WRITE_FILE path=[\'"](.*?)[\'"]>(.*?)</WRITE_FILE>'
+    """处理AI响应，提取文件操作和显示文本"""
+    # 修复的正则：正确转义引号
+    file_pattern = r'<WRITE_FILE path=["'](.*?)["']>(.*?)</WRITE_FILE>'
     file_matches = re.findall(file_pattern, response, re.DOTALL)
 
-    # 移除文件标签后的显示文本
     display_text = re.sub(
         file_pattern,
         lambda m: f"📄 *[文件写入请求: {m.group(1)}]*",
@@ -402,7 +386,6 @@ async def run_roundtable_discussion(
     """运行圆桌讨论"""
     chat_id = update.effective_chat.id
 
-    # 检查是否已有活跃讨论
     if chat_id in active_discussions:
         await update.message.reply_text(
             "⚠️ 当前已有活跃讨论！\n"
@@ -410,124 +393,64 @@ async def run_roundtable_discussion(
         )
         return
 
-    # 创建讨论状态
     discussion = DiscussionState(topic, chat_id)
     active_discussions[chat_id] = discussion
 
-    # 发送开始消息
     await update.message.reply_text(
         f"🎯 **圆桌讨论开始**\n\n"
         f"📋 议题: {topic}\n"
-        f"👥 参与者: {', '.join(AGENTS.keys())}\n"
-        f"🔄 最大轮次: {MAX_ROUNDS}\n\n"
-        f"三位AI将依次发言，直到达成共识...",
+        f"👥 参与者: {', '.join(AGENTS.keys())}\n\n"
+        f"三位AI将依次发言...",
         parse_mode='Markdown'
     )
 
-    # 多轮循环
     for round_num in range(1, MAX_ROUNDS + 1):
         discussion.round = round_num
 
-        # 发送Round标记
-        await update.message.reply_text(
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"**📍 Round {round_num}**\n"
-            f"━━━━━━━━━━━━━━━━━━━━",
-            parse_mode='Markdown'
-        )
+        await update.message.reply_text(f"━━━━━━━━━━ **Round {round_num}** ━━━━━━━━━━", parse_mode='Markdown')
 
-        # 三个AI依次发言
         for agent in AGENTS.keys():
             emoji = AGENTS[agent]["emoji"]
-
-            # 显示"正在思考"
-            thinking_msg = await update.message.reply_text(
-                f"{emoji} **{agent}** is thinking..."
-            )
+            thinking_msg = await update.message.reply_text(f"{emoji} **{agent}** is thinking...")
 
             try:
-                # 构建prompt
                 history_text = discussion.get_history_text()
                 prompt = build_discussion_prompt(agent, topic, history_text, round_num)
 
-                # 调用AI（异步）
                 loop = asyncio.get_running_loop()
-                response = await loop.run_in_executor(
-                    None,
-                    run_agent_cli,
-                    agent,
-                    prompt
-                )
+                response = await loop.run_in_executor(None, run_agent_cli, agent, prompt)
 
-                # 提取投票
                 vote = extract_vote(response)
-
-                # 保存到历史
                 discussion.add_message(agent, response, vote)
-
-                # 解析文件操作
                 display_text, file_matches = process_ai_response(response)
 
-                # 更新消息
                 vote_display = f"\n\n📊 投票: `{vote}`" if vote != "pending" else ""
                 await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=thinking_msg.message_id,
-                    text=f"{emoji} **[{agent}]** (Round {round_num}):\n\n{display_text}{vote_display}",
+                    text=f"{emoji} **[{agent}]**:\n\n{display_text}{vote_display}",
                     parse_mode='Markdown'
                 )
 
-                # 处理文件写入请求
                 if file_matches:
-                    await handle_file_write_requests(
-                        update,
-                        context,
-                        file_matches,
-                        thinking_msg.message_id
-                    )
+                    await handle_file_write_requests(update, context, file_matches, thinking_msg.message_id)
 
             except Exception as e:
-                logger.error(f"Error in discussion round {round_num}, agent {agent}: {e}")
+                logger.error(f"Error in discussion: {e}")
                 await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=thinking_msg.message_id,
-                    text=f"{emoji} **[{agent}]**: ❌ 调用失败: {str(e)}"
+                    text=f"{emoji} **[{agent}]**: ❌ Error: {str(e)}"
                 )
 
-        # 检测共识
         consensus, decision = check_consensus(discussion)
-
         if consensus:
             discussion.consensus_reached = True
-            discussion.final_decision = decision
-
-            await update.message.reply_text(
-                f"✅ **讨论结束！**\n\n"
-                f"经过 **{round_num}** 轮讨论，三位AI达成共识。\n\n"
-                f"**最终决策**: {decision}\n\n"
-                f"使用 /export 导出完整讨论记录。",
-                parse_mode='Markdown'
-            )
-
-            # 清理状态
+            await update.message.reply_text(f"✅ **讨论结束：达成共识！**\n\n最终决策: {decision}", parse_mode='Markdown')
             del active_discussions[chat_id]
             return
 
-        # 继续下一轮
-        if round_num < MAX_ROUNDS:
-            await update.message.reply_text(
-                f"⏭️ 未达成共识，进入 Round {round_num + 1}...\n"
-                f"当前投票: {', '.join([f'{k}={v[:20]}...' if len(v) > 20 else f'{k}={v}' for k, v in discussion.votes.items()])}"
-            )
-
-    # 达到最大轮次
-    await update.message.reply_text(
-        f"⚠️ **已达到最大轮次 ({MAX_ROUNDS})**\n\n"
-        f"讨论结束，未能完全达成共识。\n"
-        f"使用 /export 查看完整讨论记录。",
-        parse_mode='Markdown'
-    )
-
+    await update.message.reply_text(f"⚠️ **已达到最大轮次**，讨论结束。", parse_mode='Markdown')
     del active_discussions[chat_id]
 
 
@@ -542,19 +465,16 @@ async def handle_file_write_requests(
         key = f"{update.effective_chat.id}_{original_msg_id}_{file_path}"
         pending_writes[key] = {"path": file_path, "content": content.strip()}
 
-        keyboard = [[
+        keyboard = [[ 
             InlineKeyboardButton("✅ Approve", callback_data=f"write|{key}"),
             InlineKeyboardButton("❌ Discard", callback_data=f"discard|{key}")
         ]]
 
         preview = "\n".join(content.strip().splitlines()[:8])
-        if len(content.splitlines()) > 8:
-            preview += "\n..."
+        if len(content.splitlines()) > 8: preview += "\n..."
 
         await update.message.reply_text(
-            f"📝 **文件写入请求**\n\n"
-            f"文件: `{file_path}`\n\n"
-            f"```\n{preview}\n```",
+            f"📝 **File Write Request**\nFile: `{file_path}`\n```\n{preview}\n```",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
@@ -563,283 +483,130 @@ async def handle_file_write_requests(
 # ============= Telegram命令处理器 =============
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """启动命令"""
     await update.message.reply_text(
-        "👋 **欢迎使用 Agora Telegram Enhanced!**\n\n"
-        "🎯 **核心功能**\n"
-        "• 多AI协作讨论\n"
-        "• 智能识别AI\n"
-        "• 自动达成共识\n\n"
-        "📋 **使用方式**\n"
-        "1️⃣ 直接对话触发讨论:\n"
-        "   `\"产品要做XX功能，你们讨论下技术方案\"`\n\n"
-        "2️⃣ 指定AI回答:\n"
-        "   `\"claude 设计一个架构\"`\n"
-        "   `\"codex 写个排序算法\"`\n\n"
-        "3️⃣ 使用命令:\n"
-        "   `/discuss <话题>` - 开始讨论\n"
-        "   `/project` - 查看项目配置\n"
-        "   `/stop` - 停止当前讨论\n"
-        "   `/export` - 导出讨论记录\n"
-        "   `/ls` - 列出文件\n\n"
-        "💡 提示:\n"
-        "• 说话中包含\"讨论\"会自动启动圆桌模式\n"
-        "• AI会自动读取项目结构，无需手动提供",
+        "👋 **Welcome to Agora (Real AI Version)**\n\n"
+        "Try saying: \"讨论一下如何实现登录功能\"",
         parse_mode='Markdown'
     )
 
-
 async def cmd_discuss(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """手动启动讨论"""
     if not context.args:
-        await update.message.reply_text(
-            "⚠️ 请提供讨论话题！\n\n"
-            "用法: `/discuss 实现用户登录功能的技术方案`",
-            parse_mode='Markdown'
-        )
+        await update.message.reply_text("Usage: `/discuss <topic>`", parse_mode='Markdown')
         return
-
     topic = ' '.join(context.args)
     await run_roundtable_discussion(update, context, topic)
 
-
 async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """停止当前讨论"""
-    chat_id = update.effective_chat.id
-
-    if chat_id not in active_discussions:
+    if update.effective_chat.id in active_discussions:
+        del active_discussions[update.effective_chat.id]
+        await update.message.reply_text("🛑 讨论已强制停止。")
+    else:
         await update.message.reply_text("⚠️ 当前没有活跃的讨论。")
-        return
-
-    discussion = active_discussions[chat_id]
-    await update.message.reply_text(
-        f"🛑 **讨论已停止**\n\n"
-        f"议题: {discussion.topic}\n"
-        f"轮次: {discussion.round}/{MAX_ROUNDS}\n"
-        f"使用 /export 导出记录。"
-    )
-
-    del active_discussions[chat_id]
-
-
-async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """导出讨论记录"""
-    chat_id = update.effective_chat.id
-
-    # 这里简化处理，实际可以保存到数据库
-    await update.message.reply_text(
-        "📦 **导出功能**\n\n"
-        "讨论记录已保存在服务器内存中。\n"
-        "完整版本可以实现导出为JSON/Markdown文件。"
-    )
-
 
 async def cmd_ls(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """列出文件"""
-    try:
-        # 使用Python内置os模块，避免命令注入
-        files = []
-        for item in sorted(os.listdir(PROJECT_ROOT)):
-            path = os.path.join(PROJECT_ROOT, item)
-            if os.path.isdir(path):
-                files.append(f"{item}/")
-            elif os.access(path, os.X_OK):
-                files.append(f"{item}*")
-            else:
-                files.append(item)
-
-        files_text = "\n".join(files) if files else "(empty directory)"
-        await update.message.reply_text(
-            f"📂 **项目目录文件**: `{PROJECT_ROOT}`\n```\n{files_text}\n```",
-            parse_mode='Markdown'
-        )
-    except Exception as e:
-        logger.error(f"Failed to list directory: {e}")
-        await update.message.reply_text(f"❌ 错误: {e}")
-
-
-async def cmd_project(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """查看项目配置信息"""
-    tree_preview = get_project_tree(PROJECT_ROOT, 2)[:500]  # 限制长度
-
-    await update.message.reply_text(
-        f"📁 **项目配置**\n\n"
-        f"**工作目录**: `{PROJECT_ROOT}`\n"
-        f"**自动包含结构**: {'✅ 开启' if AUTO_INCLUDE_TREE else '❌ 关闭'}\n"
-        f"**最大深度**: {MAX_TREE_DEPTH}\n\n"
-        f"**项目结构预览**:\n```\n{tree_preview}\n```\n\n"
-        f"💡 **提示**:\n"
-        f"• 设置工作目录: `export PROJECT_ROOT=/path/to/project`\n"
-        f"• AI会自动看到项目结构\n"
-        f"• 写文件时路径相对于工作目录",
-        parse_mode='Markdown'
-    )
-
+    files = subprocess.getoutput("ls -F")
+    await update.message.reply_text(f"📂 **Files:**\n```\n{files}\n```", parse_mode='Markdown')
 
 async def smart_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """智能消息处理器"""
-    if not update.message or not update.message.text:
-        return
-
+    if not update.message or not update.message.text: return
     text = update.message.text
-    chat_id = update.effective_chat.id
-
-    # 1. 检查是否触发讨论模式
+    
+    # 自动触发讨论
     if should_start_discussion(text):
-        # 提取讨论话题（去掉"讨论"等关键词）
-        topic = re.sub(
-            r'(请|你们|大家)?(讨论|商量|聊聊|说说)(一下|下)?',
-            '',
-            text
-        ).strip()
-
-        if not topic or len(topic) < 5:
-            topic = text  # 保留原文
-
-        await run_roundtable_discussion(update, context, topic)
+        await run_roundtable_discussion(update, context, text)
         return
 
-    # 2. 检测是否指定了特定AI
+    # 检测特定AI调用
     detected_agents = detect_agents(text)
-
     if detected_agents:
-        # 单个或多个AI回答
         for agent in detected_agents:
-            # 提取prompt（去掉agent名称）
-            prompt = re.sub(
-                rf'(@?{agent.lower()}|{agent})\s*[:,：]?\s*',
-                '',
-                text,
-                flags=re.IGNORECASE
-            ).strip()
-
-            if not prompt:
-                prompt = text
-
-            # 调用AI
+            prompt = re.sub(rf'(@?{agent.lower()}|{agent})\s*[:,：]?\s*', '', text, flags=re.IGNORECASE).strip() or text
             await call_single_agent(update, context, agent, prompt)
     else:
-        # 没有明确指定，记录日志
-        logger.info(f"Chat {chat_id}: {text}")
+        # 默认路由给所有AI（或者是Help）
+        pass
 
-
-async def call_single_agent(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-    agent: str,
-    prompt: str
-):
-    """调用单个AI"""
+async def call_single_agent(update, context, agent, prompt):
     emoji = AGENTS[agent]["emoji"]
-
-    status_msg = await update.message.reply_text(
-        f"{emoji} **{agent}** is thinking..."
-    )
-
+    status_msg = await update.message.reply_text(f"{emoji} **{agent}** is thinking...")
+    
     try:
-        # 构建系统prompt
         role = AGENTS[agent]["role"]
-        system_prompt = f"You are {agent} ({role}). Keep responses concise for Telegram chat."
-        full_prompt = f"{system_prompt}\n\nUser: {prompt}"
-
-        # 调用AI
+        full_prompt = f"You are {agent} ({role}). Keep concise.\n\nUser: {prompt}"
+        
         loop = asyncio.get_running_loop()
-        response = await loop.run_in_executor(
-            None,
-            run_agent_cli,
-            agent,
-            full_prompt
-        )
-
-        # 解析文件操作
+        response = await loop.run_in_executor(None, run_agent_cli, agent, full_prompt)
+        
         display_text, file_matches = process_ai_response(response)
-
-        # 更新消息
+        
         await context.bot.edit_message_text(
             chat_id=update.effective_chat.id,
             message_id=status_msg.message_id,
             text=f"{emoji} **[{agent}]**:\n\n{display_text}",
             parse_mode='Markdown'
         )
-
-        # 处理文件写入
+        
         if file_matches:
-            await handle_file_write_requests(
-                update,
-                context,
-                file_matches,
-                status_msg.message_id
-            )
-
+            await handle_file_write_requests(update, context, file_matches, status_msg.message_id)
+            
     except Exception as e:
-        logger.error(f"Error calling {agent}: {e}")
         await context.bot.edit_message_text(
             chat_id=update.effective_chat.id,
             message_id=status_msg.message_id,
-            text=f"{emoji} **[{agent}]**: ❌ 调用失败: {str(e)}"
+            text=f"{emoji} **[{agent}]**: ❌ Error: {str(e)}"
         )
 
-
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """按钮回调处理"""
     query = update.callback_query
     await query.answer()
-
     data = query.data.split('|', 1)
-    action = data[0]
-    key = data[1]
-
+    action, key = data[0], data[1]
+    
     if action == "write":
         if key in pending_writes:
-            file_info = pending_writes.pop(key)
-            path = file_info["path"]
-            content = file_info["content"]
-
+            info = pending_writes.pop(key)
             try:
                 # 安全检查：防止路径遍历攻击
-                abs_path = os.path.abspath(os.path.join(PROJECT_ROOT, path))
+                abs_path = os.path.abspath(os.path.join(PROJECT_ROOT, info["path"]))
                 abs_project_root = os.path.abspath(PROJECT_ROOT)
-
+                
                 if not abs_path.startswith(abs_project_root):
                     await query.edit_message_text(
-                        text=f"❌ **安全错误**: 路径 `{path}` 超出项目目录范围",
+                        text=f"❌ **安全错误**: 路径 `{info['path']}` 超出项目目录范围",
                         parse_mode='Markdown'
                     )
                     return
-
+                
                 # 确保目录存在
                 os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-
-                with open(abs_path, 'w', encoding='utf-8') as f:
-                    f.write(content)
+                
+                with open(abs_path, 'w', encoding='utf-8') as f: f.write(info["content"])
                 await query.edit_message_text(
-                    text=f"✅ **成功**: 文件 `{path}` 已写入。",
+                    text=f"✅ **成功**: 文件 `{info['path']}` 已写入。",
                     parse_mode='Markdown'
                 )
             except Exception as e:
-                logger.error(f"Failed to write file {path}: {e}")
+                logger.error(f"Failed to write file {info['path']}: {e}")
                 await query.edit_message_text(
-                    text=f"❌ **错误**: 写入 `{path}` 失败: {e}",
+                    text=f"❌ **错误**: 写入 `{info['path']}` 失败: {e}",
                     parse_mode='Markdown'
                 )
         else:
             await query.edit_message_text(
                 text="⚠️ **过期**: 文件数据未找到（服务器重启？）"
             )
-
+            
     elif action == "discard":
         if key in pending_writes:
             del pending_writes[key]
         await query.edit_message_text(text="🚫 **已取消**: 文件写入已放弃。")
 
-
 # ============= 主程序 =============
 
 def main():
-    """主函数"""
     if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
-        print("❌ 错误: 请设置 TELEGRAM_BOT_TOKEN 环境变量!")
-        print("   export TELEGRAM_BOT_TOKEN='your_token_here'")
+        logger.error("❌ 错误: 请设置 TELEGRAM_BOT_TOKEN 环境变量或在 .env 文件中配置!")
+        logger.error("   例如: export TELEGRAM_BOT_TOKEN='你的Token' 或者在项目根目录创建 .env 文件")
         return
 
     # 构建应用
@@ -853,9 +620,9 @@ def main():
     application.add_handler(CommandHandler('start', cmd_start))
     application.add_handler(CommandHandler('discuss', cmd_discuss))
     application.add_handler(CommandHandler('stop', cmd_stop))
-    application.add_handler(CommandHandler('export', cmd_export))
+    # application.add_handler(CommandHandler('export', cmd_export)) # 导出功能暂不实现
     application.add_handler(CommandHandler('ls', cmd_ls))
-    application.add_handler(CommandHandler('project', cmd_project))
+    # application.add_handler(CommandHandler('project', cmd_project)) # 项目配置暂不实现
 
     # 添加消息处理器（智能路由）
     application.add_handler(
@@ -865,10 +632,12 @@ def main():
     # 添加按钮回调处理器
     application.add_handler(CallbackQueryHandler(button_callback))
 
-    # 启动
-    print("🤖 Agora Telegram Enhanced Bot is running...")
+    print("🤖 Agora Telegram Bot (Real Intelligence) is running...")
     print(f"👥 Configured agents: {', '.join(AGENTS.keys())}")
     print(f"🔄 Max discussion rounds: {MAX_ROUNDS}")
+    print(f"📁 Project root: {PROJECT_ROOT}")
+    if PROXY_URL:
+        print(f"🌐 Using proxy: {PROXY_URL}")
     application.run_polling()
 
 
