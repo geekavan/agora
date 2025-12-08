@@ -1,5 +1,5 @@
 #!/bin/bash
-# Agora 安装脚本 - 创建全局命令
+# Agora 安装脚本 - 创建全局命令（无需 sudo）
 
 # 自动检测脚本所在目录（支持任何路径）
 AGORA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,19 +18,51 @@ fi
 # 确保脚本可执行
 chmod +x "$AGORA_BIN"
 
+# 优先安装到用户目录（不需要 sudo）
+USER_BIN="$HOME/.local/bin"
+
+# 创建用户 bin 目录（如果不存在）
+if [ ! -d "$USER_BIN" ]; then
+    echo "📁 创建目录: $USER_BIN"
+    mkdir -p "$USER_BIN"
+fi
+
 # 创建符号链接
-echo "📝 创建全局命令（需要输入密码）..."
-sudo ln -sf "$AGORA_BIN" /usr/local/bin/agora
+echo "📝 创建命令链接: $USER_BIN/agora"
+ln -sf "$AGORA_BIN" "$USER_BIN/agora"
 
 if [ $? -eq 0 ]; then
     echo ""
     echo "✅ 安装成功！"
     echo ""
-    echo "现在你可以在任何目录运行："
-    echo "  $ agora           # 使用当前目录作为项目路径"
-    echo "  $ agora -h        # 查看帮助"
+
+    # 检查 PATH
+    if [[ ":$PATH:" == *":$USER_BIN:"* ]]; then
+        echo "✅ $USER_BIN 已在 PATH 中"
+        echo ""
+        echo "现在你可以在任何目录运行："
+        echo "  $ agora           # 使用当前目录作为项目路径"
+        echo "  $ agora -h        # 查看帮助"
+    else
+        echo "⚠️  需要将 $USER_BIN 添加到 PATH"
+        echo ""
+        echo "请运行以下命令之一（根据你使用的 shell）："
+        echo ""
+        echo "# 如果使用 bash："
+        echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc"
+        echo "  source ~/.bashrc"
+        echo ""
+        echo "# 如果使用 zsh："
+        echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.zshrc"
+        echo "  source ~/.zshrc"
+        echo ""
+        echo "# 如果使用 fish："
+        echo "  fish_add_path ~/.local/bin"
+        echo ""
+        echo "完成后就可以在任何目录运行 'agora' 了！"
+    fi
     echo ""
-    echo "测试命令："
+    echo "📖 快速测试："
     echo "  $ cd /path/to/your/project"
     echo "  $ agora"
     echo ""
@@ -39,6 +71,6 @@ else
     echo "❌ 安装失败"
     echo ""
     echo "手动安装方法："
-    echo "  sudo ln -sf $AGORA_BIN /usr/local/bin/agora"
+    echo "  ln -sf $AGORA_BIN $USER_BIN/agora"
     exit 1
 fi

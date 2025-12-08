@@ -74,31 +74,49 @@ AGENTS = {
 }
 ```
 
-### 5. 启动Bot
+### 5. 安装全局命令（推荐）
 
-**方式一：本地启动**（推荐用于开发）
-```bash
-./start.sh
-# 或指定项目路径
-./start.sh /path/to/your/project
-```
+**一次安装，到处使用：**
 
-**方式二：直接运行Python**
 ```bash
-python3 agora_telegram.py
-```
-
-**方式三：安装为全局命令**（可在任何目录运行）
-```bash
-# 安装
 ./install.sh
+```
 
-# 使用
+安装完成后，根据提示配置 PATH（如果需要）：
+
+```bash
+# bash 用户
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+
+# zsh 用户
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+### 6. 使用
+
+**在任何项目目录运行：**
+
+```bash
 cd /path/to/your/project
 agora
+```
 
-# 或指定路径
-agora -p /path/to/your/project
+**AI 将自动在当前目录工作！** 无需指定路径。
+
+---
+
+### 其他启动方式
+
+**本地开发模式**（不安装）：
+```bash
+./start.sh
+```
+
+**直接运行**：
+```bash
+python3 agora_telegram.py
 ```
 
 ### 使用方式

@@ -216,7 +216,8 @@ def run_agent_cli(agent_name: str, prompt: str) -> str:
             capture_output=True,
             text=True,
             check=False,
-            timeout=120  # 2分钟超时
+            timeout=120,  # 2分钟超时
+            cwd=PROJECT_ROOT  # AI 在项目目录下执行
         )
         output = result.stdout.strip()
         if not output and result.stderr:
