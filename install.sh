@@ -36,6 +36,25 @@ if [ $? -eq 0 ]; then
     echo "✅ 安装成功！"
     echo ""
 
+    # 创建用户配置目录
+    USER_CONFIG_DIR="$HOME/.config/agora"
+    if [ ! -d "$USER_CONFIG_DIR" ]; then
+        echo "📁 创建配置目录: $USER_CONFIG_DIR"
+        mkdir -p "$USER_CONFIG_DIR"
+    fi
+
+    # 如果用户配置不存在，提示复制
+    if [ ! -f "$USER_CONFIG_DIR/.env" ]; then
+        echo ""
+        echo "⚠️  请配置 Telegram Bot Token："
+        echo "  cp $AGORA_DIR/.env.example $USER_CONFIG_DIR/.env"
+        echo "  nano $USER_CONFIG_DIR/.env"
+        echo ""
+        echo "或者使用环境变量："
+        echo "  export TELEGRAM_BOT_TOKEN='your_token_here'"
+        echo ""
+    fi
+
     # 检查 PATH
     if [[ ":$PATH:" == *":$USER_BIN:"* ]]; then
         echo "✅ $USER_BIN 已在 PATH 中"

@@ -38,15 +38,48 @@ pip3 install -r requirements.txt
 
 ### 3. 配置环境变量
 
-```bash
-# 复制配置模板
-cp .env.example .env
+Agora 支持 **3 种配置方式**（按优先级从高到低）：
 
-# 编辑配置文件，填写你的 Bot Token
+#### 方式 1：用户配置文件（推荐）✨
+
+```bash
+# 创建用户配置目录
+mkdir -p ~/.config/agora
+
+# 复制配置模板
+cp .env.example ~/.config/agora/.env
+
+# 编辑配置
+nano ~/.config/agora/.env
+```
+
+**优点**：独立于项目，删除源代码也不影响
+
+#### 方式 2：项目配置文件
+
+```bash
+# 在项目目录配置
+cp .env.example .env
 nano .env
 ```
 
-在 `.env` 文件中设置：
+**优点**：快速测试，适合开发
+
+#### 方式 3：环境变量
+
+```bash
+# 临时设置
+export TELEGRAM_BOT_TOKEN='你的Bot Token'
+
+# 永久设置（添加到 ~/.zshrc 或 ~/.bashrc）
+echo 'export TELEGRAM_BOT_TOKEN="你的Bot Token"' >> ~/.zshrc
+```
+
+**优点**：最灵活，适合 CI/CD
+
+---
+
+在配置文件中设置：
 ```bash
 TELEGRAM_BOT_TOKEN=你的Bot Token
 # PROXY_URL=http://127.0.0.1:7890  # 可选：代理设置
