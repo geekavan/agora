@@ -318,6 +318,51 @@ Round 2: 深入讨论
 生成总结 & 结束
 ```
 
+## 🔄 卸载和重装
+
+### 卸载 Agora
+
+```bash
+# 1. 删除全局命令
+rm -f ~/.local/bin/agora
+
+# 2. 删除用户配置（可选，如果要保留配置可以跳过）
+rm -rf ~/.config/agora
+
+# 3. 删除源代码（可选）
+rm -rf /path/to/agora
+```
+
+### 重新安装
+
+```bash
+# 1. 进入新的 agora 目录
+cd /path/to/new/agora
+
+# 2. 运行安装脚本
+./install.sh
+
+# 3. 如果需要，配置 PATH（按提示操作）
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+### 更新到最新版本
+
+```bash
+# 进入项目目录
+cd /path/to/agora
+
+# 拉取最新代码
+git pull
+
+# 无需重新安装，符号链接会自动指向新代码
+```
+
+**注意**：配置文件 `~/.config/agora/.env` 独立于源代码，更新或重装不会影响配置。
+
+---
+
 ## 🛠️ 故障排除
 
 ### 问题1: Bot无法启动
