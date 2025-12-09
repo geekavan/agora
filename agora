@@ -91,9 +91,9 @@ if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
 fi
 
 # 检查 Python 脚本
-if [ ! -f "$AGORA_HOME/agora_telegram.py" ]; then
-    echo "❌ 错误: agora_telegram.py 不存在！"
-    echo "   路径: $AGORA_HOME/agora_telegram.py"
+if [ ! -f "$AGORA_HOME/main.py" ]; then
+    echo "❌ 错误: main.py 不存在！"
+    echo "   路径: $AGORA_HOME/main.py"
     exit 1
 fi
 
@@ -125,4 +125,4 @@ export PROJECT_ROOT="$PROJECT_PATH"
 
 # 切换到 Agora 目录并启动
 cd "$AGORA_HOME"
-python3 agora_telegram.py
+python3 main.py
