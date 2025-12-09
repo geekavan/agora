@@ -14,9 +14,9 @@ from telegram.ext import ContextTypes
 from config import AGENTS
 from utils import md_escape
 from session import clear_chat_sessions, get_session_id
-from agents import run_agent_cli, SmartRouter, RouteType
+from agents import run_agent_cli_async, SmartRouter, RouteType
 from agents.runner import process_ai_response
-from discussion import run_roundtable_discussion, stop_discussion
+from discussion import run_roundtable_discussion, stop_discussion_async
 from .callbacks import handle_file_write_requests
 
 logger = logging.getLogger(__name__)
@@ -44,9 +44,11 @@ async def cmd_discuss(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """处理 /stop 命令"""
-    if stop_discussion(update.effective_chat.id):
-        await update.message.reply_text("讨论已强制停止。")
+    """处理 /stop 命令 - 立即终止讨论和所有AI进程"""
+    chat_id = update.effective_chat.id
+    stopped = await stop_discussion_async(chat_id)
+    if stopped:
+        await update.message.reply_text("已停止讨论并终止所有AI进程。")
     else:
         await update.message.reply_text("当前没有活跃的讨论。")
 
@@ -168,7 +170,7 @@ async def call_single_agent(
     prompt: str,
     reply_context: Optional[str] = None
 ):
-    """调用单个AI"""
+    """调用单个AI（使用异步版本，支持活动超时）"""
     emoji = AGENTS[agent]["emoji"]
     status_msg = await update.message.reply_text(f"{emoji} **{agent}** is thinking...")
 
@@ -189,8 +191,8 @@ async def call_single_agent(
         )
 
         chat_id = update.effective_chat.id
-        loop = asyncio.get_running_loop()
-        response = await loop.run_in_executor(None, run_agent_cli, agent, full_prompt, chat_id)
+        # 使用异步版本，支持活动超时（有输出就重置计时器）
+        response = await run_agent_cli_async(agent, full_prompt, chat_id)
 
         display_text, file_matches = process_ai_response(response)
 

@@ -4,6 +4,7 @@
 """
 
 import os
+import uuid
 import logging
 from typing import List, Tuple
 
@@ -15,8 +16,14 @@ from utils import md_escape
 
 logger = logging.getLogger(__name__)
 
-# 文件写入暂存
+# 文件写入暂存 {short_key: {"path": ..., "content": ...}}
 pending_writes = {}
+
+
+def generate_short_key() -> str:
+    """生成短key用于callback_data（Telegram限制64字节）"""
+    # 使用UUID前8位，足够唯一且不会超过限制
+    return uuid.uuid4().hex[:8]
 
 
 async def handle_file_write_requests(
@@ -27,12 +34,14 @@ async def handle_file_write_requests(
 ):
     """处理文件写入请求"""
     for file_path, content in file_matches:
-        key = f"{update.effective_chat.id}_{original_msg_id}_{file_path}"
-        pending_writes[key] = {"path": file_path, "content": content.strip()}
+        # 使用短key避免超过Telegram 64字节限制
+        short_key = generate_short_key()
+        pending_writes[short_key] = {"path": file_path, "content": content.strip()}
 
+        # callback_data 格式: "write|xxxxxxxx" 最多约15字节，远小于64字节限制
         keyboard = [[
-            InlineKeyboardButton("Approve", callback_data=f"write|{key}"),
-            InlineKeyboardButton("Discard", callback_data=f"discard|{key}")
+            InlineKeyboardButton("Approve", callback_data=f"w|{short_key}"),
+            InlineKeyboardButton("Discard", callback_data=f"d|{short_key}")
         ]]
 
         preview = "\n".join(content.strip().splitlines()[:8])
@@ -53,7 +62,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data.split('|', 1)
     action, key = data[0], data[1]
 
-    if action == "write":
+    # 'w' = write, 'd' = discard (短格式节省字节)
+    if action == "w" or action == "write":
         if key in pending_writes:
             info = pending_writes.pop(key)
             try:
@@ -88,7 +98,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text="**过期**: 文件数据未找到（服务器重启？）"
             )
 
-    elif action == "discard":
+    elif action == "d" or action == "discard":
         if key in pending_writes:
             del pending_writes[key]
         await query.edit_message_text(text="**已取消**: 文件写入已放弃。")

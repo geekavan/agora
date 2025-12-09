@@ -51,8 +51,9 @@ DEFAULT_ROUTER_AGENT = "Claude"
 
 # ============= 讨论配置 =============
 
-MAX_ROUNDS = 5
-CONSENSUS_THRESHOLD = 2
+MAX_ROUNDS = 5                    # 最大讨论轮次
+CONVERGENCE_SCORE = 90            # 收敛分数阈值（达到此分数即结束）
+CONVERGENCE_DELTA = 5             # 收敛增幅阈值（连续2轮提升小于此值即结束）
 
 # ============= 项目配置 =============
 
