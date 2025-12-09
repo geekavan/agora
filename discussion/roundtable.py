@@ -113,10 +113,21 @@ def build_review_prompt(reviewer: str, topic: str, proposals_text: str) -> str:
 【任务】
 对每个方案评分(0-100)并给出改进建议。
 
-格式要求（每个方案一个）：
-## [AI名称] 的方案
-<SCORE>分数</SCORE>
-改进建议：...
+【输出格式】严格按以下格式，每个方案一个：
+
+## Claude 的方案
+<SCORE>85</SCORE>
+改进建议：xxx
+
+## Gemini 的方案
+<SCORE>78</SCORE>
+改进建议：xxx
+
+## Codex 的方案
+<SCORE>90</SCORE>
+改进建议：xxx
+
+⚠️ 注意：<SCORE>标签内只写数字，如 <SCORE>85</SCORE>，不要写成 <85分数</85分数> 这种错误格式！
 
 直接输出评审结果。"""
 
