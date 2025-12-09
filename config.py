@@ -65,6 +65,11 @@ MAX_TREE_DEPTH = 3
 
 SESSION_FILE = Path.home() / ".config/agora/sessions.json"
 
+# ============= 超时配置 =============
+
+IDLE_TIMEOUT = 1200               # 无输出超时（秒）
+MAX_TOTAL_TIMEOUT = 1800          # 最大总超时（秒）
+
 # ============= 路由配置 =============
 
 # 触发讨论模式的关键词

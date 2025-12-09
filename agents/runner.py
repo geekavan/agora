@@ -13,7 +13,7 @@ import uuid
 import logging
 from typing import Tuple, List, Optional
 
-from config import AGENTS, PROJECT_ROOT, PROXY_URL
+from config import AGENTS, PROJECT_ROOT, PROXY_URL, IDLE_TIMEOUT, MAX_TOTAL_TIMEOUT
 from session import (
     get_session_id,
     set_session_id,
@@ -29,9 +29,7 @@ logger = logging.getLogger(__name__)
 active_processes = {}
 active_processes_lock = asyncio.Lock()
 
-# 超时配置
-IDLE_TIMEOUT = 60  # 无输出超时（秒）
-MAX_TOTAL_TIMEOUT = 300  # 最大总超时（5分钟）
+# 超时配置已移至 config.py
 
 
 def run_agent_cli(agent_name: str, prompt: str, chat_id: int) -> str:
