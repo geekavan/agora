@@ -10,7 +10,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from config import AGENTS, MAX_ROUNDS, CONVERGENCE_SCORE, CONVERGENCE_DELTA
-from utils import md_escape, get_project_context
+from utils import md_escape, get_project_context, safe_send_message
 from agents.runner import run_agent_cli_async, process_ai_response, kill_agent_process
 from .state import DiscussionState
 
@@ -18,6 +18,47 @@ logger = logging.getLogger(__name__)
 
 active_discussions = {}
 cancel_events = {}
+
+
+async def _wait_for_tasks_with_cancel(
+    tasks: list,
+    discussion: 'DiscussionState',
+    cancel_event: asyncio.Event,
+    update: 'Update'
+) -> bool:
+    """
+    等待任务完成，同时检查取消事件
+
+    Args:
+        tasks: [(name, task), ...] 任务列表
+        discussion: 讨论状态
+        cancel_event: 取消事件
+        update: Telegram update 对象
+
+    Returns:
+        True 如果被取消，False 如果正常完成
+    """
+    for name, task in tasks:
+        # 检查是否需要取消
+        if discussion.stopped or cancel_event.is_set():
+            # 取消所有未完成的任务
+            for _, t in tasks:
+                if not t.done():
+                    t.cancel()
+            await update.message.reply_text("讨论已中断。")
+            return True
+
+        # 等待当前任务完成
+        while not task.done():
+            if discussion.stopped or cancel_event.is_set():
+                for _, t in tasks:
+                    if not t.done():
+                        t.cancel()
+                await update.message.reply_text("讨论已中断。")
+                return True
+            await asyncio.sleep(0.5)
+
+    return False
 
 
 def build_proposal_prompt(agent: str, topic: str, round_num: int, base_proposal: str = "", project_context: str = "") -> str:
@@ -116,11 +157,14 @@ async def run_roundtable_discussion(
 
             discussion.round = round_num
 
-            # ===== 阶段1: 提案 =====
+            # ===== Round 开始 =====
             await update.message.reply_text(
-                f"━━━━ **Round {round_num}: 提案阶段** ━━━━",
+                f"━━━━ **Round {round_num}** ━━━━",
                 parse_mode='Markdown'
             )
+
+            # ===== 阶段1: 提案 =====
+            await update.message.reply_text("📝 **提案阶段**", parse_mode='Markdown')
 
             # 获取基准方案和项目上下文
             base_proposal = ""
@@ -145,26 +189,11 @@ async def run_roundtable_discussion(
                 proposal_tasks.append((agent, task))
 
             # 等待所有提案完成
+            if await _wait_for_tasks_with_cancel(proposal_tasks, discussion, cancel_event, update):
+                return
+
+            # 处理所有提案结果
             for agent, task in proposal_tasks:
-                if discussion.stopped or cancel_event.is_set():
-                    # 取消所有未完成的任务
-                    for _, t in proposal_tasks:
-                        if not t.done():
-                            t.cancel()
-                    await update.message.reply_text("讨论已中断。")
-                    return
-
-                # 等待任务完成，同时检查取消事件
-                while not task.done():
-                    if discussion.stopped or cancel_event.is_set():
-                        # 取消所有未完成的任务
-                        for _, t in proposal_tasks:
-                            if not t.done():
-                                t.cancel()
-                        await update.message.reply_text("讨论已中断。")
-                        return
-                    await asyncio.sleep(0.5)
-
                 response = task.result() if not task.cancelled() else "[已取消]"
                 emoji = AGENTS[agent]["emoji"]
 
@@ -179,11 +208,13 @@ async def run_roundtable_discussion(
                 discussion.add_proposal(agent, response)
                 display_text, file_matches = process_ai_response(response)
 
-                await context.bot.edit_message_text(
+                proposal_text = f"{emoji} **{agent}** 的方案:\n\n{md_escape(display_text)}"
+                await safe_send_message(
+                    bot=context.bot,
                     chat_id=chat_id,
+                    text=proposal_text,
                     message_id=status_msgs[agent].message_id,
-                    text=f"{emoji} **{agent}** 的方案:\n\n{md_escape(display_text[:1500])}",
-                    parse_mode='Markdown'
+                    file_name=f"proposal_{agent}_round{round_num}"
                 )
 
                 if file_matches:
@@ -194,10 +225,7 @@ async def run_roundtable_discussion(
                 return
 
             # ===== 阶段2: 评审 =====
-            await update.message.reply_text(
-                f"━━━━ **Round {round_num}: 评审阶段** ━━━━",
-                parse_mode='Markdown'
-            )
+            await update.message.reply_text("📋 **评审阶段**", parse_mode='Markdown')
 
             proposals_text = discussion.get_all_proposals_text()
 
@@ -215,27 +243,12 @@ async def run_roundtable_discussion(
                 task = asyncio.create_task(run_agent_cli_async(reviewer, prompt, chat_id, cancel_event))
                 review_tasks.append((reviewer, task))
 
-            # 等待所有评审完成并解析分数
+            # 等待所有评审完成
+            if await _wait_for_tasks_with_cancel(review_tasks, discussion, cancel_event, update):
+                return
+
+            # 处理所有评审结果并解析分数
             for reviewer, task in review_tasks:
-                if discussion.stopped or cancel_event.is_set():
-                    # 取消所有未完成的任务
-                    for _, t in review_tasks:
-                        if not t.done():
-                            t.cancel()
-                    await update.message.reply_text("讨论已中断。")
-                    return
-
-                # 等待任务完成，同时检查取消事件
-                while not task.done():
-                    if discussion.stopped or cancel_event.is_set():
-                        # 取消所有未完成的任务
-                        for _, t in review_tasks:
-                            if not t.done():
-                                t.cancel()
-                        await update.message.reply_text("讨论已中断。")
-                        return
-                    await asyncio.sleep(0.5)
-
                 response = task.result() if not task.cancelled() else "[已取消]"
                 emoji = AGENTS[reviewer]["emoji"]
 
@@ -259,11 +272,13 @@ async def run_roundtable_discussion(
                         if proposal:
                             proposal.add_review(reviewer, score)
 
-                await context.bot.edit_message_text(
+                review_text = f"{emoji} **{reviewer}** 评审完成:\n\n{md_escape(response)}"
+                await safe_send_message(
+                    bot=context.bot,
                     chat_id=chat_id,
+                    text=review_text,
                     message_id=review_msgs[reviewer].message_id,
-                    text=f"{emoji} **{reviewer}** 评审完成:\n\n{md_escape(response[:1000])}",
-                    parse_mode='Markdown'
+                    file_name=f"review_{reviewer}_round{round_num}"
                 )
 
             # 更新最佳方案
@@ -285,24 +300,34 @@ async def run_roundtable_discussion(
                 discussion.final_score = best.avg_score if best else 0
                 discussion.final_result = best.content if best else ""
 
-                await update.message.reply_text(
+                final_text = (
                     f"**讨论结束: {reason}**\n\n"
                     f"最终方案来自: **{best.agent}**\n"
                     f"最终得分: **{discussion.final_score:.1f}**\n\n"
                     f"{'='*40}\n\n"
-                    f"{md_escape(discussion.final_result[:2000])}",
-                    parse_mode='Markdown'
+                    f"{md_escape(discussion.final_result)}"
+                )
+                await safe_send_message(
+                    bot=context.bot,
+                    chat_id=chat_id,
+                    text=final_text,
+                    file_name=f"final_proposal_{best.agent}"
                 )
                 return
 
         # 达到最大轮次
         best = discussion.best_proposal
         if best:
-            await update.message.reply_text(
+            max_round_text = (
                 f"**已达最大轮次，讨论结束**\n\n"
                 f"最佳方案: **{best.agent}** ({best.avg_score:.1f}分)\n\n"
-                f"{md_escape(best.content[:2000])}",
-                parse_mode='Markdown'
+                f"{md_escape(best.content)}"
+            )
+            await safe_send_message(
+                bot=context.bot,
+                chat_id=chat_id,
+                text=max_round_text,
+                file_name=f"final_proposal_{best.agent}"
             )
 
     finally:
@@ -324,21 +349,6 @@ async def stop_discussion_async(chat_id: int) -> bool:
 
     killed = await kill_agent_process(chat_id)
     if killed:
-        stopped = True
-
-    return stopped
-
-
-def stop_discussion(chat_id: int) -> bool:
-    """同步停止讨论"""
-    stopped = False
-
-    if chat_id in active_discussions:
-        active_discussions[chat_id].stopped = True
-        stopped = True
-
-    if chat_id in cancel_events:
-        cancel_events[chat_id].set()
         stopped = True
 
     return stopped

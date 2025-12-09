@@ -4,6 +4,7 @@
 """
 
 import os
+import time
 import uuid
 import logging
 from typing import List, Tuple
@@ -16,8 +17,23 @@ from utils import md_escape
 
 logger = logging.getLogger(__name__)
 
-# 文件写入暂存 {short_key: {"path": ..., "content": ...}}
+# 文件写入暂存 {short_key: {"path": ..., "content": ..., "created_at": ...}}
 pending_writes = {}
+
+# 过期时间（秒）
+PENDING_WRITE_EXPIRE_TIME = 3600  # 1小时
+
+
+def cleanup_expired_writes():
+    """清理过期的待写入数据"""
+    now = time.time()
+    expired_keys = [
+        k for k, v in pending_writes.items()
+        if now - v.get("created_at", 0) > PENDING_WRITE_EXPIRE_TIME
+    ]
+    for k in expired_keys:
+        del pending_writes[k]
+        logger.debug(f"Cleaned up expired pending write: {k}")
 
 
 def generate_short_key() -> str:
@@ -33,10 +49,17 @@ async def handle_file_write_requests(
     original_msg_id: int
 ):
     """处理文件写入请求"""
+    # 每次处理新请求时清理过期数据
+    cleanup_expired_writes()
+
     for file_path, content in file_matches:
         # 使用短key避免超过Telegram 64字节限制
         short_key = generate_short_key()
-        pending_writes[short_key] = {"path": file_path, "content": content.strip()}
+        pending_writes[short_key] = {
+            "path": file_path,
+            "content": content.strip(),
+            "created_at": time.time()
+        }
 
         # callback_data 格式: "write|xxxxxxxx" 最多约15字节，远小于64字节限制
         keyboard = [[

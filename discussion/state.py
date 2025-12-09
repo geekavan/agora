@@ -78,7 +78,8 @@ class DiscussionState:
         if len(self.score_history) >= 3:
             delta1 = self.score_history[-1] - self.score_history[-2]
             delta2 = self.score_history[-2] - self.score_history[-3]
-            if delta1 < delta_threshold and delta2 < delta_threshold:
+            # 只有正向提升小于阈值才算收敛（避免分数下降时误判）
+            if 0 <= delta1 < delta_threshold and 0 <= delta2 < delta_threshold:
                 return True, f"连续2轮提升小于{delta_threshold}分，已收敛"
 
         if self.round >= self.max_rounds:

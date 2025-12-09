@@ -12,7 +12,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from config import AGENTS
-from utils import md_escape
+from utils import md_escape, safe_send_message
 from session import clear_chat_sessions, get_session_id
 from agents import run_agent_cli_async, SmartRouter, RouteType
 from agents.runner import process_ai_response
@@ -196,11 +196,13 @@ async def call_single_agent(
 
         display_text, file_matches = process_ai_response(response)
 
-        await context.bot.edit_message_text(
+        response_text = f"{emoji} **[{md_escape(agent)}]**:\n\n{md_escape(display_text)}"
+        await safe_send_message(
+            bot=context.bot,
             chat_id=chat_id,
+            text=response_text,
             message_id=status_msg.message_id,
-            text=f"{emoji} **[{md_escape(agent)}]**:\n\n{md_escape(display_text)}",
-            parse_mode='Markdown'
+            file_name=f"response_{agent}"
         )
 
         if file_matches:

@@ -29,19 +29,123 @@ logger = logging.getLogger(__name__)
 active_processes = {}
 active_processes_lock = asyncio.Lock()
 
-# 超时配置已移至 config.py
+
+# ============= 公共辅助函数 =============
+
+def _prepare_env() -> dict:
+    """准备环境变量"""
+    env = os.environ.copy()
+    env["NODE_NO_WARNINGS"] = "1"
+    if PROXY_URL:
+        for key in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]:
+            env[key] = PROXY_URL
+    return env
+
+
+def _build_command(agent_name: str, chat_id: int) -> Tuple[List[str], Optional[str], bool]:
+    """
+    构建 AI 命令
+
+    Returns:
+        (命令列表, session_id, 是否首次调用)
+    """
+    agent_config = AGENTS[agent_name]
+    session_id = get_session_id(chat_id, agent_name)
+
+    # 检查是否是失败标记
+    if session_id and session_id.startswith("FAILED_"):
+        logger.info(f"Detected failed session marker, recreating for {agent_name}")
+        clear_chat_sessions(chat_id, agent_name)
+        session_id = None
+
+    if session_id is None:
+        # 首次调用：创建新会话
+        logger.info(f"Creating new session: {agent_name} for chat {chat_id}")
+        if agent_config.get("needs_uuid"):
+            session_id = str(uuid.uuid4())
+            cmd = [c.replace("{session_id}", session_id) for c in agent_config["create_command"]]
+        else:
+            cmd = agent_config["create_command"].copy()
+        is_first_call = True
+    else:
+        # 后续调用：恢复会话
+        logger.info(f"Resuming session: {agent_name} ({session_id[:8]}...)")
+        cmd = [c.replace("{session_id}", session_id) for c in agent_config["command_template"]]
+        is_first_call = False
+
+    return cmd, session_id, is_first_call
+
+
+def _handle_session_save(
+    agent_name: str,
+    chat_id: int,
+    session_id: Optional[str],
+    is_first_call: bool,
+    stdout_data: str,
+    stderr_data: str
+):
+    """处理会话保存逻辑"""
+    if is_first_call:
+        if session_id is None:
+            full_output = stderr_data if agent_name == "Codex" else stdout_data
+            extracted_id = extract_session_id_from_output(full_output, agent_name)
+            if extracted_id:
+                set_session_id(chat_id, agent_name, extracted_id)
+            else:
+                fallback_id = f"FAILED_{int(time.time())}"
+                set_session_id(chat_id, agent_name, fallback_id)
+                logger.warning(f"Failed to extract session for {agent_name}, marked as {fallback_id}")
+        else:
+            set_session_id(chat_id, agent_name, session_id)
+
+    set_last_agent(chat_id, agent_name)
+
+
+def _process_output(stdout: str, stderr: str) -> str:
+    """处理 CLI 输出，清理警告信息"""
+    output = stdout.strip()
+
+    if not output and stderr:
+        stderr_clean = []
+        for line in stderr.strip().split('\n'):
+            if any(skip in line for skip in ["Loaded cached credentials", "DeprecationWarning"]):
+                continue
+            if line.strip():
+                stderr_clean.append(line)
+        if stderr_clean:
+            output = "\n".join(stderr_clean)
+
+    return output
+
+
+def _handle_cli_error(agent_name: str, chat_id: int, returncode: int, stderr: str, output: str) -> Optional[str]:
+    """
+    处理 CLI 错误
+
+    Returns:
+        错误消息，如果没有错误返回 None
+    """
+    if returncode != 0:
+        error_msg = stderr.strip() or output
+        logger.error(f"CLI failed for {agent_name} (code {returncode}): {error_msg}")
+
+        if "session" in error_msg.lower():
+            if any(kw in error_msg.lower() for kw in ["not found", "invalid", "expired"]):
+                clear_chat_sessions(chat_id, agent_name)
+                return "[Error]: Session expired or invalid. Please retry."
+
+        return f"[Error]: {error_msg}"
+
+    if not output:
+        return "[Error]: No response from agent (possible network issue). Please retry."
+
+    return None
 
 
 def run_agent_cli(agent_name: str, prompt: str, chat_id: int) -> str:
     """
-    调用AI CLI，支持会话管理
-
-    工作流程：
-    1. 检查是否已有session_id
-    2. 如果没有，使用create_command创建新会话
-    3. 如果有，使用command_template恢复会话
-    4. 执行命令并返回结果
-    5. 首次创建时，保存session_id
+    同步调用 AI CLI，支持会话管理
+    主要用于路由判断等简单场景
     """
     # 并发保护：同一个chat+agent的调用串行化
     key = (chat_id, agent_name)
@@ -50,51 +154,13 @@ def run_agent_cli(agent_name: str, prompt: str, chat_id: int) -> str:
 
     with session_locks[key]:
         agent_config = AGENTS[agent_name]
-        session_id = get_session_id(chat_id, agent_name)
-
-        # 检查是否是失败标记，如果是则清除并重建
-        if session_id and session_id.startswith("FAILED_"):
-            logger.info(f"Detected failed session marker, recreating for {agent_name}")
-            clear_chat_sessions(chat_id, agent_name)
-            session_id = None
-
-        # 构建命令
-        if session_id is None:
-            # 首次调用：创建新会话
-            logger.info(f"Creating new session: {agent_name} for chat {chat_id}")
-
-            if agent_config.get("needs_uuid"):
-                session_id = str(uuid.uuid4())
-                cmd = [c.replace("{session_id}", session_id)
-                       for c in agent_config["create_command"]]
-            else:
-                cmd = agent_config["create_command"].copy()
-
-            is_first_call = True
-        else:
-            # 后续调用：恢复会话
-            logger.info(f"Resuming session: {agent_name} ({session_id[:8]}...)")
-            cmd = [c.replace("{session_id}", session_id)
-                   for c in agent_config["command_template"]]
-            is_first_call = False
-
-        # 添加prompt
+        cmd, session_id, is_first_call = _build_command(agent_name, chat_id)
         cmd.append(prompt)
 
         try:
-            # 准备环境变量
-            env = os.environ.copy()
-            env["NODE_NO_WARNINGS"] = "1"
-            if PROXY_URL:
-                env["HTTP_PROXY"] = PROXY_URL
-                env["HTTPS_PROXY"] = PROXY_URL
-                env["ALL_PROXY"] = PROXY_URL
-                env["http_proxy"] = PROXY_URL
-                env["https_proxy"] = PROXY_URL
-                env["all_proxy"] = PROXY_URL
-
-            # 执行命令（needs_stdin_close的agent需要传入空字符串关闭stdin）
+            env = _prepare_env()
             stdin_input = "" if agent_config.get("needs_stdin_close") else None
+
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -106,64 +172,15 @@ def run_agent_cli(agent_name: str, prompt: str, chat_id: int) -> str:
                 cwd=PROJECT_ROOT
             )
 
-            output = result.stdout.strip()
+            output = _process_output(result.stdout, result.stderr)
 
-            # 如果stdout为空，检查stderr
-            if not output and result.stderr:
-                stderr_clean = []
-                for line in result.stderr.strip().split('\n'):
-                    if "Loaded cached credentials" in line:
-                        continue
-                    if "DeprecationWarning" in line:
-                        continue
-                    if line.strip() == "":
-                        continue
-                    stderr_clean.append(line)
+            # 检查错误
+            error = _handle_cli_error(agent_name, chat_id, result.returncode, result.stderr, output)
+            if error:
+                return error
 
-                if stderr_clean:
-                    output = "\n".join(stderr_clean)
-                else:
-                    logger.debug(f"{agent_name} stderr (warnings only): {result.stderr.strip()}")
-
-            # 检查CLI返回码
-            if result.returncode != 0:
-                error_msg = result.stderr.strip() or output
-                logger.error(f"CLI failed for {agent_name} (code {result.returncode}): {error_msg}")
-
-                if "session" in error_msg.lower():
-                    if any(keyword in error_msg.lower() for keyword in ["not found", "invalid", "expired"]):
-                        logger.warning(f"Invalid session detected, clearing {agent_name} session")
-                        clear_chat_sessions(chat_id, agent_name)
-                        return "[Error]: Session expired or invalid. Please retry - a new session will be created."
-
-                return f"[Error]: {error_msg}"
-
-            if not output:
-                logger.warning(f"{agent_name} returned empty output (rc=0).")
-                return "[Error]: No response from agent (possible network/proxy issue). Please retry or /clear session."
-
-            # 首次调用时保存session_id
-            if is_first_call:
-                if session_id is None:
-                    if agent_name == "Codex":
-                        full_output = result.stderr if result.stderr else result.stdout
-                        logger.info(f"Codex: Using stderr for session extraction (length: {len(full_output)})")
-                    else:
-                        full_output = result.stdout if result.stdout else output
-
-                    extracted_id = extract_session_id_from_output(full_output, agent_name)
-
-                    if extracted_id:
-                        set_session_id(chat_id, agent_name, extracted_id)
-                    else:
-                        fallback_id = f"FAILED_{int(time.time())}"
-                        set_session_id(chat_id, agent_name, fallback_id)
-                        logger.warning(f"Failed to extract session for {agent_name}, marked as {fallback_id}")
-                else:
-                    set_session_id(chat_id, agent_name, session_id)
-
-            # 记录最近对话的AI
-            set_last_agent(chat_id, agent_name)
+            # 保存会话
+            _handle_session_save(agent_name, chat_id, session_id, is_first_call, result.stdout, result.stderr)
 
             return output
 
@@ -196,44 +213,15 @@ async def run_agent_cli_async(
     cancel_event: Optional[asyncio.Event] = None
 ) -> str:
     """
-    异步版本的AI CLI调用，支持：
+    异步版本的 AI CLI 调用，支持：
     1. 活动超时：有输出就重置计时器
     2. 可取消：通过 cancel_event 立即终止
     """
     agent_config = AGENTS[agent_name]
-    session_id = get_session_id(chat_id, agent_name)
-
-    # 检查是否是失败标记
-    if session_id and session_id.startswith("FAILED_"):
-        logger.info(f"Detected failed session marker, recreating for {agent_name}")
-        clear_chat_sessions(chat_id, agent_name)
-        session_id = None
-
-    # 构建命令
-    if session_id is None:
-        logger.info(f"Creating new session: {agent_name} for chat {chat_id}")
-        if agent_config.get("needs_uuid"):
-            session_id = str(uuid.uuid4())
-            cmd = [c.replace("{session_id}", session_id)
-                   for c in agent_config["create_command"]]
-        else:
-            cmd = agent_config["create_command"].copy()
-        is_first_call = True
-    else:
-        logger.info(f"Resuming session: {agent_name} ({session_id[:8]}...)")
-        cmd = [c.replace("{session_id}", session_id)
-               for c in agent_config["command_template"]]
-        is_first_call = False
-
+    cmd, session_id, is_first_call = _build_command(agent_name, chat_id)
     cmd.append(prompt)
 
-    # 准备环境变量
-    env = os.environ.copy()
-    env["NODE_NO_WARNINGS"] = "1"
-    if PROXY_URL:
-        for key in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]:
-            env[key] = PROXY_URL
-
+    env = _prepare_env()
     process = None
     process_key = (chat_id, agent_name)
 
@@ -267,48 +255,16 @@ async def run_agent_cli_async(
         if cancel_event and cancel_event.is_set():
             return "[已取消]: 操作被用户中断"
 
-        output = stdout_data.strip()
+        output = _process_output(stdout_data, stderr_data)
 
-        # 如果 stdout 为空，检查 stderr
-        if not output and stderr_data:
-            stderr_clean = []
-            for line in stderr_data.strip().split('\n'):
-                if any(skip in line for skip in ["Loaded cached credentials", "DeprecationWarning"]):
-                    continue
-                if line.strip():
-                    stderr_clean.append(line)
-            if stderr_clean:
-                output = "\n".join(stderr_clean)
+        # 检查错误
+        error = _handle_cli_error(agent_name, chat_id, process.returncode, stderr_data, output)
+        if error:
+            return error
 
-        # 检查返回码
-        if process.returncode != 0:
-            error_msg = stderr_data.strip() or output
-            logger.error(f"CLI failed for {agent_name} (code {process.returncode}): {error_msg}")
+        # 保存会话
+        _handle_session_save(agent_name, chat_id, session_id, is_first_call, stdout_data, stderr_data)
 
-            if "session" in error_msg.lower():
-                if any(kw in error_msg.lower() for kw in ["not found", "invalid", "expired"]):
-                    clear_chat_sessions(chat_id, agent_name)
-                    return "[Error]: Session expired or invalid. Please retry."
-
-            return f"[Error]: {error_msg}"
-
-        if not output:
-            return "[Error]: No response from agent (possible network issue). Please retry."
-
-        # 首次调用保存 session_id
-        if is_first_call:
-            if session_id is None:
-                full_output = stderr_data if agent_name == "Codex" else stdout_data
-                extracted_id = extract_session_id_from_output(full_output, agent_name)
-                if extracted_id:
-                    set_session_id(chat_id, agent_name, extracted_id)
-                else:
-                    fallback_id = f"FAILED_{int(time.time())}"
-                    set_session_id(chat_id, agent_name, fallback_id)
-            else:
-                set_session_id(chat_id, agent_name, session_id)
-
-        set_last_agent(chat_id, agent_name)
         return output
 
     except asyncio.CancelledError:
