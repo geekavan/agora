@@ -24,23 +24,23 @@ AGENTS = {
     "Claude": {
         "role": "Architect & Lead Reviewer",
         "emoji": "🔷",
-        "command_template": ["claude", "-p", "--resume", "{session_id}"],
-        "create_command": ["claude", "-p", "--session-id", "{session_id}"],
+        "command_template": ["claude", "-p", "--dangerously-skip-permissions", "--resume", "{session_id}"],
+        "create_command": ["claude", "-p", "--dangerously-skip-permissions", "--session-id", "{session_id}"],
         "needs_uuid": True,
         "is_router": True,  # Claude 作为默认路由AI
     },
     "Codex": {
         "role": "Lead Developer",
         "emoji": "🟢",
-        "command_template": ["codex", "exec", "resume", "{session_id}"],
-        "create_command": ["codex", "exec", "--skip-git-repo-check"],
+        "command_template": ["codex", "exec", "resume", "{session_id}", "--full-auto"],
+        "create_command": ["codex", "exec", "--skip-git-repo-check", "--full-auto"],
         "needs_uuid": False,
     },
     "Gemini": {
         "role": "QA & Security Expert",
         "emoji": "🔵",
-        "command_template": ["gemini", "--resume", "{session_id}", "-p"],
-        "create_command": ["gemini", "-p"],
+        "command_template": ["gemini", "--resume", "{session_id}", "-y", "-p"],
+        "create_command": ["gemini", "-y", "-p"],
         "needs_uuid": False,
         "needs_stdin_close": True,
     }
