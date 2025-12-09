@@ -351,6 +351,10 @@ async def stop_discussion_async(chat_id: int) -> bool:
     if killed:
         stopped = True
 
+    # 立即清理活跃状态，避免卡住无法重新开始
+    active_discussions.pop(chat_id, None)
+    cancel_events.pop(chat_id, None)
+
     return stopped
 
 
