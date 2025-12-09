@@ -147,9 +147,25 @@ async def run_roundtable_discussion(
             # 等待所有提案完成
             for agent, task in proposal_tasks:
                 if discussion.stopped or cancel_event.is_set():
+                    # 取消所有未完成的任务
+                    for _, t in proposal_tasks:
+                        if not t.done():
+                            t.cancel()
+                    await update.message.reply_text("讨论已中断。")
                     return
 
-                response = await task
+                # 等待任务完成，同时检查取消事件
+                while not task.done():
+                    if discussion.stopped or cancel_event.is_set():
+                        # 取消所有未完成的任务
+                        for _, t in proposal_tasks:
+                            if not t.done():
+                                t.cancel()
+                        await update.message.reply_text("讨论已中断。")
+                        return
+                    await asyncio.sleep(0.5)
+
+                response = task.result() if not task.cancelled() else "[已取消]"
                 emoji = AGENTS[agent]["emoji"]
 
                 if "[已取消]" in response or "[Error]" in response:
@@ -174,6 +190,7 @@ async def run_roundtable_discussion(
                     await handle_file_write_requests(update, context, file_matches, status_msgs[agent].message_id)
 
             if discussion.stopped or cancel_event.is_set():
+                await update.message.reply_text("讨论已中断。")
                 return
 
             # ===== 阶段2: 评审 =====
@@ -201,9 +218,25 @@ async def run_roundtable_discussion(
             # 等待所有评审完成并解析分数
             for reviewer, task in review_tasks:
                 if discussion.stopped or cancel_event.is_set():
+                    # 取消所有未完成的任务
+                    for _, t in review_tasks:
+                        if not t.done():
+                            t.cancel()
+                    await update.message.reply_text("讨论已中断。")
                     return
 
-                response = await task
+                # 等待任务完成，同时检查取消事件
+                while not task.done():
+                    if discussion.stopped or cancel_event.is_set():
+                        # 取消所有未完成的任务
+                        for _, t in review_tasks:
+                            if not t.done():
+                                t.cancel()
+                        await update.message.reply_text("讨论已中断。")
+                        return
+                    await asyncio.sleep(0.5)
+
+                response = task.result() if not task.cancelled() else "[已取消]"
                 emoji = AGENTS[reviewer]["emoji"]
 
                 if "[已取消]" in response or "[Error]" in response:
