@@ -7,9 +7,9 @@ from .manager import (
     extract_session_id_from_output,
     get_last_agent,
     set_last_agent,
-    session_locks,
-    SESSION_FILE
+    session_locks
 )
+from config import SESSION_FILE
 
 __all__ = [
     'load_sessions',

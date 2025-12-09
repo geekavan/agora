@@ -51,10 +51,15 @@ def signal_handler(signum, frame):
 
     global application_instance
     try:
-        if application_instance:
+        if application_instance and application_instance.running:
+            # 使用线程安全的方式停止应用
             import asyncio
-            loop = asyncio.get_event_loop()
-            loop.call_soon_threadsafe(application_instance.stop)
+            try:
+                loop = asyncio.get_running_loop()
+                loop.call_soon_threadsafe(application_instance.stop)
+            except RuntimeError:
+                # 如果没有运行中的事件循环，创建新的来执行停止
+                asyncio.run(application_instance.stop())
     except Exception as e:
         print(f"停止应用时出错: {e}")
 

@@ -91,7 +91,20 @@ def build_discussion_prompt(
 
 保持简洁专业，Telegram聊天风格。"""
     else:
-        prompt = f"""Round {round_num}: 继续讨论。如果达成共识，请明确投票。"""
+        prompt = f"""你是 {agent} ({role})，继续参与圆桌讨论。
+
+【讨论议题】
+{topic}
+
+【之前的讨论记录】
+{history_text}
+
+【Round {round_num} - 你的任务】
+1. 回应其他AI的观点，补充或反驳
+2. 如果达成共识，用 <VOTE>同意</VOTE> 明确投票
+3. 如果需要写文件，使用 <WRITE_FILE path="...">content</WRITE_FILE>
+
+保持简洁，聚焦关键分歧点。"""
 
     return prompt
 
@@ -125,6 +138,12 @@ async def run_roundtable_discussion(
     )
 
     for round_num in range(1, MAX_ROUNDS + 1):
+        # 检查是否被强制停止
+        if discussion.stopped:
+            if chat_id in active_discussions:
+                del active_discussions[chat_id]
+            return
+
         discussion.round = round_num
 
         await update.message.reply_text(
@@ -133,6 +152,12 @@ async def run_roundtable_discussion(
         )
 
         for agent in AGENTS.keys():
+            # 每个agent发言前也检查是否被停止
+            if discussion.stopped:
+                if chat_id in active_discussions:
+                    del active_discussions[chat_id]
+                return
+
             emoji = AGENTS[agent]["emoji"]
             thinking_msg = await update.message.reply_text(f"{emoji} **{agent}** is thinking...")
 
@@ -142,6 +167,17 @@ async def run_roundtable_discussion(
 
                 loop = asyncio.get_running_loop()
                 response = await loop.run_in_executor(None, run_agent_cli, agent, prompt, chat_id)
+
+                # AI响应后再次检查是否被停止
+                if discussion.stopped:
+                    await context.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=thinking_msg.message_id,
+                        text=f"{emoji} **[{agent}]**: (讨论已停止)"
+                    )
+                    if chat_id in active_discussions:
+                        del active_discussions[chat_id]
+                    return
 
                 vote = extract_vote(response)
                 discussion.add_message(agent, response, vote)
@@ -173,20 +209,23 @@ async def run_roundtable_discussion(
                 f"**讨论结束：达成共识！**\n\n最终决策: {md_escape(decision)}",
                 parse_mode='Markdown'
             )
-            del active_discussions[chat_id]
+            if chat_id in active_discussions:
+                del active_discussions[chat_id]
             return
 
     await update.message.reply_text(
         f"**已达到最大轮次**，讨论结束。",
         parse_mode='Markdown'
     )
-    del active_discussions[chat_id]
+    if chat_id in active_discussions:
+        del active_discussions[chat_id]
 
 
 def stop_discussion(chat_id: int) -> bool:
     """停止讨论"""
     if chat_id in active_discussions:
-        del active_discussions[chat_id]
+        # 设置停止标志，让正在运行的循环能够检测到并退出
+        active_discussions[chat_id].stopped = True
         return True
     return False
 

@@ -86,28 +86,18 @@ def run_agent_cli(agent_name: str, prompt: str, chat_id: int) -> str:
                 env["https_proxy"] = PROXY_URL
                 env["all_proxy"] = PROXY_URL
 
-            # 执行命令
-            if agent_config.get("needs_stdin_close"):
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    input="",
-                    env=env,
-                    check=False,
-                    timeout=120,
-                    cwd=PROJECT_ROOT
-                )
-            else:
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    env=env,
-                    check=False,
-                    timeout=120,
-                    cwd=PROJECT_ROOT
-                )
+            # 执行命令（needs_stdin_close的agent需要传入空字符串关闭stdin）
+            stdin_input = "" if agent_config.get("needs_stdin_close") else None
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                input=stdin_input,
+                env=env,
+                check=False,
+                timeout=120,
+                cwd=PROJECT_ROOT
+            )
 
             output = result.stdout.strip()
 

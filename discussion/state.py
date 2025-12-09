@@ -22,6 +22,7 @@ class DiscussionState:
         self.consensus_reached = False
         self.final_decision = ""
         self.created_at = datetime.now()
+        self.stopped = False  # 用于标记讨论是否被强制停止
 
     def add_message(self, agent: str, message: str, vote: str = "pending"):
         """添加消息到历史"""

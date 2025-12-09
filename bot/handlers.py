@@ -21,9 +21,6 @@ from .callbacks import handle_file_write_requests
 
 logger = logging.getLogger(__name__)
 
-# 会话状态缓存（用于存储最近对话的AI）
-chat_sessions_cache = {}
-
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理 /start 命令"""
@@ -85,10 +82,9 @@ async def cmd_clear_session(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """快捷清空当前聊天的所有会话"""
-    chat_id = update.effective_chat.id
-    clear_chat_sessions(chat_id)
-    await update.message.reply_text("已清空当前聊天的所有AI会话")
+    """快捷清空当前聊天的所有会话（/clear_session的别名）"""
+    # 直接调用 cmd_clear_session，保持功能一致
+    await cmd_clear_session(update, context)
 
 
 async def cmd_sessions(update: Update, context: ContextTypes.DEFAULT_TYPE):

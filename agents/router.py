@@ -69,7 +69,6 @@ class SmartRouter:
         Returns:
             RouteResult 包含路由类型、目标AI列表和原因
         """
-        message_lower = message.lower()
         cleaned_prompt = message
 
         # ========== 1. 检测明确提及的AI ==========

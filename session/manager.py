@@ -10,9 +10,7 @@ import threading
 import logging
 from typing import Optional, Dict
 
-from config import SESSION_FILE as CONFIG_SESSION_FILE, PROJECT_ROOT
-
-SESSION_FILE = CONFIG_SESSION_FILE
+from config import SESSION_FILE, PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
