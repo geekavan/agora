@@ -32,7 +32,7 @@ AGENTS = {
     "Codex": {
         "role": "Lead Developer",
         "emoji": "🟢",
-        "command_template": ["codex", "exec", "resume", "{session_id}", "--full-auto"],
+        "command_template": ["codex", "exec", "resume", "{session_id}"],
         "create_command": ["codex", "exec", "--skip-git-repo-check", "--full-auto"],
         "needs_uuid": False,
     },
