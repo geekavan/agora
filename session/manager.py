@@ -29,6 +29,11 @@ MAX_HISTORY_SIZE = 20
 # 并发锁字典: {(chat_id, agent_name): Lock}
 session_locks: Dict[tuple, threading.Lock] = {}
 
+# ============= 防抖保存机制 =============
+_save_timer: Optional[threading.Timer] = None
+_save_lock = threading.Lock()
+_SAVE_DELAY = 2.0  # 延迟2秒保存，合并多次调用
+
 
 def load_sessions():
     """启动时加载所有会话"""
@@ -54,8 +59,8 @@ def load_sessions():
         chat_history = {}
 
 
-def save_sessions():
-    """保存会话到文件"""
+def _do_save():
+    """实际执行保存操作"""
     try:
         SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
         data = {
@@ -68,6 +73,33 @@ def save_sessions():
         logger.debug("Sessions saved")
     except Exception as e:
         logger.error(f"Failed to save sessions: {e}")
+
+
+def save_sessions(immediate: bool = False):
+    """
+    保存会话到文件（带防抖机制）
+
+    Args:
+        immediate: 是否立即保存（用于程序退出时）
+    """
+    global _save_timer
+
+    if immediate:
+        # 立即保存，取消待执行的定时器
+        with _save_lock:
+            if _save_timer:
+                _save_timer.cancel()
+                _save_timer = None
+        _do_save()
+        return
+
+    # 防抖：延迟保存，合并多次调用
+    with _save_lock:
+        if _save_timer:
+            _save_timer.cancel()
+        _save_timer = threading.Timer(_SAVE_DELAY, _do_save)
+        _save_timer.daemon = True  # 设为守护线程，主程序退出时自动终止
+        _save_timer.start()
 
 
 def get_session_id(chat_id: int, agent_name: str) -> Optional[str]:

@@ -144,13 +144,15 @@ class SmartRouter:
         """
         检测明确提及的AI名字（区分调用和引用）
 
-        调用模式（会触发AI）:
-        - @claude, claude:, claude，
-        - claude帮我, claude你, 问问claude
-        - codex和gemini你们觉得
+        新逻辑：
+        1. 找出消息中所有出现的AI名字
+        2. 排除"引用模式"的AI（AI的、AI写的、AI说的等）
+        3. 剩下的就是要调用的AI
 
-        引用模式（不触发AI）:
-        - claude说的, claude他, claude的回答
+        引用模式（不触发调用）:
+        - "claude的代码" - AI + 的
+        - "gemini写的代码" - AI + 动词 + 的
+        - "codex说的话" - AI + 动词 + 的
         """
         message_lower = message.lower()
         agents = []
@@ -158,34 +160,22 @@ class SmartRouter:
         for agent in AGENTS.keys():
             agent_lower = agent.lower()
 
-            # 调用模式
-            call_patterns = [
-                rf'@{agent_lower}',                     # @claude
-                rf'{agent_lower}\s*[,，:：]',           # claude: 或 claude，
-                rf'{agent_lower}\s*(帮|你|来|看|觉得)',  # claude帮我, claude你觉得
-                rf'(问问|让|叫|请)\s*{agent_lower}',    # 问问claude
-                rf'{agent_lower}\s*(和|跟)\s*\w+',      # claude和codex
-                rf'\w+\s*(和|跟)\s*{agent_lower}',      # codex和claude
-            ]
+            # 检查AI名字是否出现在消息中
+            if agent_lower not in message_lower:
+                continue
 
-            # 引用模式（提及但不是调用）
-            ref_patterns = [
-                rf'{agent_lower}\s*(说的|说过|他说|她说|它说|的回答|的意见|的观点|的方案)',
-                rf'{agent_lower}\s*(他|她|它)(?!们)',    # claude他（但不是claude他们）
-            ]
+            # 引用模式：AI + 的，或 AI + 0~2字 + 的
+            # 例如：claude的、gemini写的、codex生成的
+            ref_pattern = rf'{agent_lower}\s*\S{{0,2}}的'
 
-            is_call = any(re.search(p, message_lower) for p in call_patterns)
-            is_ref = any(re.search(p, message_lower) for p in ref_patterns)
+            # 找到所有该AI出现的位置
+            all_mentions = list(re.finditer(rf'{agent_lower}', message_lower))
+            ref_mentions = list(re.finditer(ref_pattern, message_lower))
 
-            # 调用模式匹配，且不是纯引用时才添加
-            # 如果同时匹配调用和引用，以调用为准（比如"claude你觉得claude说的对吗"应该触发claude）
-            if is_call and not is_ref:
+            # 如果有非引用的提及，就触发调用
+            # 即：总提及次数 > 引用次数
+            if len(all_mentions) > len(ref_mentions):
                 agents.append(agent)
-            elif is_call and is_ref:
-                # 同时有调用和引用，检查调用是否在引用之前
-                # 简化处理：如果有明确的调用语法（@或冒号），优先触发
-                if re.search(rf'@{agent_lower}|{agent_lower}\s*[,，:：]', message_lower):
-                    agents.append(agent)
 
         return agents
 

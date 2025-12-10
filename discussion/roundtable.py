@@ -10,7 +10,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from config import AGENTS, MAX_ROUNDS, CONVERGENCE_SCORE, CONVERGENCE_DELTA
-from utils import md_escape, get_project_context, safe_send_message
+from utils import md_escape, get_project_context, safe_send_message, handle_file_write_requests
 from agents.runner import run_agent_cli_async, process_ai_response, kill_agent_process
 from .state import DiscussionState
 
@@ -138,8 +138,6 @@ async def run_roundtable_discussion(
     topic: str
 ):
     """运行圆桌讨论（评分迭代机制）"""
-    from bot.callbacks import handle_file_write_requests
-
     chat_id = update.effective_chat.id
 
     if chat_id in active_discussions:
@@ -367,7 +365,3 @@ async def stop_discussion_async(chat_id: int) -> bool:
     cancel_events.pop(chat_id, None)
 
     return stopped
-
-
-def has_active_discussion(chat_id: int) -> bool:
-    return chat_id in active_discussions

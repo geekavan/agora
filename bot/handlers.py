@@ -3,8 +3,8 @@ Telegram 命令处理器模块
 处理所有 Telegram 命令和消息
 """
 
+import os
 import re
-import subprocess
 import asyncio
 import logging
 from typing import Optional, Tuple
@@ -12,8 +12,8 @@ from typing import Optional, Tuple
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from config import AGENTS
-from utils import md_escape, safe_send_message
+from config import AGENTS, PROJECT_ROOT
+from utils import md_escape, safe_send_message, handle_file_write_requests
 from session import (
     clear_chat_sessions, get_session_id,
     add_to_history, get_chat_history, clear_chat_history
@@ -21,7 +21,6 @@ from session import (
 from agents import run_agent_cli_async, SmartRouter, RouteType
 from agents.runner import process_ai_response
 from discussion import run_roundtable_discussion, stop_discussion_async
-from .callbacks import handle_file_write_requests
 
 logger = logging.getLogger(__name__)
 
@@ -111,11 +110,25 @@ async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_ls(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理 /ls 命令"""
-    files = subprocess.getoutput("ls -F")
-    await update.message.reply_text(
-        f"**Files:**\n```\n{md_escape(files)}\n```",
-        parse_mode='Markdown'
-    )
+    try:
+        entries = os.listdir(PROJECT_ROOT)
+        # 添加目录标记（类似 ls -F）
+        formatted = []
+        for entry in sorted(entries):
+            full_path = os.path.join(PROJECT_ROOT, entry)
+            if os.path.isdir(full_path):
+                formatted.append(f"{entry}/")
+            elif os.access(full_path, os.X_OK):
+                formatted.append(f"{entry}*")
+            else:
+                formatted.append(entry)
+        files = "\n".join(formatted)
+        await update.message.reply_text(
+            f"**Files:**\n```\n{md_escape(files)}\n```",
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        await update.message.reply_text(f"Error listing files: {e}")
 
 
 async def cmd_clear_session(update: Update, context: ContextTypes.DEFAULT_TYPE):

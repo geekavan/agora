@@ -63,9 +63,9 @@ def signal_handler(signum, frame):
     except Exception as e:
         print(f"停止应用时出错: {e}")
 
-    # 保存会话数据
+    # 保存会话数据（立即保存，不使用防抖）
     try:
-        save_sessions()
+        save_sessions(immediate=True)
         print("会话数据已保存")
     except Exception as e:
         print(f"保存会话失败: {e}")
@@ -76,8 +76,8 @@ def signal_handler(signum, frame):
         subprocess.run(["pkill", "-9", "-f", "gemini"], stderr=subprocess.DEVNULL)
         subprocess.run(["pkill", "-9", "-f", "codex"], stderr=subprocess.DEVNULL)
         subprocess.run(["pkill", "-9", "-f", "claude"], stderr=subprocess.DEVNULL)
-    except:
-        pass
+    except Exception:
+        pass  # 忽略清理子进程时的错误
 
     print("再见！")
     sys.exit(0)
