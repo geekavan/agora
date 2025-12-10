@@ -23,7 +23,7 @@ PROXY_URL = os.getenv("PROXY_URL", None)
 AGENTS = {
     "Claude": {
         "role": "Architect & Lead Reviewer",
-        "emoji": "🔷",
+        "emoji": "🔸",
         "command_template": ["claude", "-p", "--dangerously-skip-permissions", "--resume", "{session_id}"],
         "create_command": ["claude", "-p", "--dangerously-skip-permissions", "--session-id", "{session_id}"],
         "needs_uuid": True,
@@ -31,14 +31,14 @@ AGENTS = {
     },
     "Codex": {
         "role": "Lead Developer",
-        "emoji": "🟢",
+        "emoji": "❇️",
         "command_template": ["codex", "exec", "resume", "{session_id}"],
         "create_command": ["codex", "exec", "--skip-git-repo-check", "--full-auto"],
         "needs_uuid": False,
     },
     "Gemini": {
         "role": "QA & Security Expert",
-        "emoji": "🔵",
+        "emoji": "💠",
         "command_template": ["gemini", "--resume", "{session_id}", "-y", "-p"],
         "create_command": ["gemini", "-y", "-p"],
         "needs_uuid": False,
