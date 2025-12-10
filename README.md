@@ -52,20 +52,47 @@ agora
 
 ### ✅ 已实现功能
 
-- **多AI多轮讨论** - 三个AI自动进行多轮技术讨论，直到达成共识
-- **智能Agent识别** - 自然语言识别用户想调用哪个AI
-- **自动共识检测** - 智能判断讨论是否达成一致
+- **多AI多轮讨论** - 三个AI自动进行多轮技术讨论，智能收敛评分机制
+- **智能路由系统** - Claude作为路由AI，智能判断应该调用哪个Agent
+- **会话上下文管理** - 支持会话持久化，AI可恢复历史对话上下文
+- **对话历史注入** - 自动将最近对话记录注入AI上下文
 - **文件写入确认** - AI写文件需要用户审批，安全可控
 - **实时聊天展示** - Telegram界面实时展示讨论过程
 - **讨论状态管理** - 支持停止、导出等控制命令
+- **模块化架构** - 清晰的代码分层，易于扩展和维护
 
 ## 🤖 AI角色
 
 | AI | 角色 | 专长 |
 |------|------|------|
-| 🔷 **Claude** | 架构师 & 主审查员 | 系统设计、架构规划、深度分析 |
-| 🟢 **Codex** | 首席开发工程师 | 代码实现、算法优化 |
-| 🔵 **Gemini** | QA & 安全专家 | 代码审查、安全检测、质量把关 |
+| 🔸 **Claude** | 架构师 & 主审查员 | 系统设计、架构规划、深度分析、智能路由 |
+| ❇️ **Codex** | 首席开发工程师 | 代码实现、算法优化 |
+| 💠 **Gemini** | QA & 安全专家 | 代码审查、安全检测、质量把关 |
+
+## 📁 项目结构
+
+```
+agora/
+├── main.py                 # 程序入口
+├── config.py               # 配置管理（AI角色、讨论参数、路由关键词）
+├── agents/                 # AI Agent 模块
+│   ├── runner.py           # Agent 执行器（会话管理、命令执行）
+│   └── router.py           # 智能路由（意图识别、Agent选择）
+├── bot/                    # Telegram Bot 模块
+│   ├── handlers.py         # 消息处理器（命令、回调）
+│   └── callbacks.py        # 回调处理（文件确认等）
+├── discussion/             # 讨论模块
+│   ├── roundtable.py       # 圆桌讨论逻辑（多轮讨论、收敛评分）
+│   └── state.py            # 讨论状态管理
+├── session/                # 会话模块
+│   └── manager.py          # 会话持久化管理
+├── utils/                  # 工具模块
+│   ├── telegram.py         # Telegram 工具（消息发送、格式化）
+│   ├── markdown.py         # Markdown 处理
+│   └── project.py          # 项目工具（目录树等）
+├── install.sh              # 安装脚本
+└── requirements.txt        # Python 依赖
+```
 
 ## 📦 快速开始
 
@@ -202,7 +229,7 @@ python3 agora_telegram.py
 
 #### 1️⃣ **自动触发讨论模式**
 
-直接对话，包含"讨论"关键词即可：
+同时包含"讨论关键词"和"主题关键词"即可触发圆桌讨论：
 
 ```
 用户: 产品要做实时消息推送功能，你们讨论下技术方案
@@ -216,11 +243,16 @@ Gemini: 从安全角度，需要注意...
 
 Round 2:
 Claude: @Gemini的建议很好，我修改...
-Codex: 我同意Claude的新方案 <VOTE>同意</VOTE>
-Gemini: 没问题 <VOTE>同意</VOTE>
+Codex: 我同意Claude的新方案
+Gemini: 没问题，方案可行
 
-✅ 讨论结束！达成共识。
+✅ 讨论结束！收敛分数达到阈值。
 ```
+
+**触发条件说明：**
+- 讨论关键词：讨论、discuss、你们商量、大家说说 等
+- 主题关键词：技术方案、架构、设计方案 等
+- 必须同时包含两类关键词才会触发圆桌讨论
 
 #### 2️⃣ **指定AI回答**
 
@@ -286,23 +318,42 @@ Gemini: 没问题 <VOTE>同意</VOTE>
 
 ### 讨论参数
 
-编辑 `agora_telegram_enhanced.py`:
+编辑 `config.py`:
 
 ```python
-MAX_ROUNDS = 5           # 最大讨论轮次
-CONSENSUS_THRESHOLD = 2  # 共识阈值（至少2个AI同意）
+MAX_ROUNDS = 5                    # 最大讨论轮次
+CONVERGENCE_SCORE = 90            # 收敛分数阈值（达到此分数即结束）
+CONVERGENCE_DELTA = 5             # 收敛增幅阈值（连续2轮提升小于此值即结束）
 ```
 
 ### AI命令配置
+
+编辑 `config.py`:
 
 ```python
 AGENTS = {
     "Claude": {
         "role": "Architect & Lead Reviewer",
-        "emoji": "🔷",
-        "command": ["你的Claude CLI命令"]  # ← 修改这里
+        "emoji": "🔸",
+        "command_template": ["claude", "-p", "--dangerously-skip-permissions", "--resume", "{session_id}"],
+        "create_command": ["claude", "-p", "--dangerously-skip-permissions", "--session-id", "{session_id}"],
+        "needs_uuid": True,
+        "is_router": True,  # Claude 作为默认路由AI
     },
-    # ...
+    "Codex": {
+        "role": "Lead Developer",
+        "emoji": "❇️",
+        "command_template": ["codex", "exec", "resume", "{session_id}"],
+        "create_command": ["codex", "exec", "--skip-git-repo-check", "--full-auto"],
+        "needs_uuid": False,
+    },
+    "Gemini": {
+        "role": "QA & Security Expert",
+        "emoji": "💠",
+        "command_template": ["gemini", "--resume", "{session_id}", "-y", "-p"],
+        "create_command": ["gemini", "-y", "-p"],
+        "needs_uuid": False,
+    }
 }
 ```
 
@@ -436,26 +487,35 @@ codex exec --skip-git-repo-check "print('test')"
 gemini "Hello"
 ```
 
-### 问题3: 讨论无法达成共识
+### 问题3: 讨论无法收敛
 
 - 增加最大轮次: `MAX_ROUNDS = 10`
-- 降低共识阈值: `CONSENSUS_THRESHOLD = 1`
-- 查看日志了解投票情况
+- 降低收敛分数阈值: `CONVERGENCE_SCORE = 80`
+- 调整收敛增幅阈值: `CONVERGENCE_DELTA = 10`
+- 查看日志了解收敛评分情况
 
 ## 📝 开发计划
+
+### 已完成
+
+- [x] 智能路由系统（Claude作为路由AI）
+- [x] 会话持久化管理
+- [x] 对话历史上下文注入
+- [x] 模块化代码重构
+- [x] 收敛评分机制（替代投票机制）
+- [x] 讨论触发优化（双关键词匹配）
 
 ### 近期计划
 
 - [ ] 导出功能完善（JSON/Markdown/PDF）
-- [ ] 讨论历史持久化（数据库）
-- [ ] 更智能的共识检测（NLP分析）
+- [ ] 更智能的收敛检测（NLP分析）
 - [ ] 支持用户中途插入意见
 
 ### 远期计划
 
 - [ ] Web Dashboard可视化
 - [ ] 多项目/多团队支持
-- [ ] AI Agent自定义配置
+- [ ] 自定义AI Agent配置界面
 - [ ] 集成代码执行环境
 
 ## 📄 许可证
