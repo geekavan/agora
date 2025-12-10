@@ -3,23 +3,79 @@ Telegram 命令处理器模块
 处理所有 Telegram 命令和消息
 """
 
+import re
 import subprocess
 import asyncio
 import logging
-from typing import Optional
+from typing import Optional, Tuple
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
 from config import AGENTS
 from utils import md_escape, safe_send_message
-from session import clear_chat_sessions, get_session_id
+from session import (
+    clear_chat_sessions, get_session_id,
+    add_to_history, get_chat_history, clear_chat_history
+)
 from agents import run_agent_cli_async, SmartRouter, RouteType
 from agents.runner import process_ai_response
 from discussion import run_roundtable_discussion, stop_discussion_async
 from .callbacks import handle_file_write_requests
 
 logger = logging.getLogger(__name__)
+
+# 默认传递的历史条数
+DEFAULT_HISTORY_LIMIT = 2
+
+
+def parse_history_limit(message: str) -> Tuple[str, int]:
+    """
+    解析消息中的历史条数参数
+
+    格式: --N 在消息开头，表示传递最近N条历史
+    例如: "--5 codex帮我看看" → 传递最近5条历史
+
+    Args:
+        message: 原始消息
+
+    Returns:
+        (cleaned_message, history_limit)
+    """
+    # 匹配开头的 --数字
+    match = re.match(r'^--(\d+)\s+', message)
+    if match:
+        limit = int(match.group(1))
+        # 限制范围 1-20
+        limit = max(1, min(20, limit))
+        cleaned = message[match.end():]
+        return cleaned, limit
+    return message, DEFAULT_HISTORY_LIMIT
+
+
+def format_history_context(history: list) -> str:
+    """
+    将历史记录格式化为上下文字符串
+
+    Args:
+        history: [{"role": "user/AI", "content": "..."}]
+
+    Returns:
+        格式化的字符串
+    """
+    if not history:
+        return ""
+
+    lines = ["[Recent conversation history]:"]
+    for item in history:
+        role = item["role"]
+        content = item["content"]
+        if role == "user":
+            lines.append(f"User: {content}")
+        else:
+            lines.append(f"{role}: {content}")
+    lines.append("")  # 空行分隔
+    return "\n".join(lines)
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -63,7 +119,7 @@ async def cmd_ls(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_clear_session(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """清空当前聊天的会话历史"""
+    """清空当前聊天的会话历史和对话记录"""
     chat_id = update.effective_chat.id
 
     if context.args and len(context.args) > 0:
@@ -80,7 +136,8 @@ async def cmd_clear_session(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
     else:
         clear_chat_sessions(chat_id)
-        await update.message.reply_text("已清空所有AI的会话历史")
+        clear_chat_history(chat_id)  # 同时清除对话历史
+        await update.message.reply_text("已清空所有AI的会话历史和对话记录")
 
 
 async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -119,12 +176,18 @@ async def smart_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
     """
     智能消息处理器
     使用 SmartRouter 进行路由判断
+
+    支持 --N 参数指定历史条数，例如:
+    --5 codex帮我看看 → 传递最近5条历史给codex
     """
     if not update.message or not update.message.text:
         return
 
     text = update.message.text
     chat_id = update.effective_chat.id
+
+    # 解析 --N 历史条数参数
+    text, history_limit = parse_history_limit(text)
 
     # 检查是否是回复某个AI的消息，并提取被引用的内容
     reply_to_agent = None
@@ -142,17 +205,24 @@ async def smart_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
     router = SmartRouter(chat_id)
     route_result = await router.route(text, reply_to_agent)
 
-    logger.info(f"Route result: {route_result.route_type.value} -> {route_result.agents} ({route_result.reason})")
+    logger.info(f"Route result: {route_result.route_type.value} -> {route_result.agents} ({route_result.reason}), history_limit={history_limit}")
 
     # 根据路由结果执行
     if route_result.route_type == RouteType.DISCUSSION:
+        # 讨论模式暂不传历史（讨论本身就是多轮）
         await run_roundtable_discussion(update, context, route_result.cleaned_prompt)
 
     elif route_result.route_type in (RouteType.SINGLE, RouteType.MULTIPLE):
+        # 保存用户消息到历史
+        add_to_history(chat_id, "user", route_result.cleaned_prompt)
+
         # 并行调用所有AI
         tasks = []
         for agent in route_result.agents:
-            tasks.append(call_single_agent(update, context, agent, route_result.cleaned_prompt, reply_context))
+            tasks.append(call_single_agent(
+                update, context, agent, route_result.cleaned_prompt,
+                reply_context, history_limit
+            ))
         await asyncio.gather(*tasks)
 
     else:
@@ -168,19 +238,47 @@ async def call_single_agent(
     context: ContextTypes.DEFAULT_TYPE,
     agent: str,
     prompt: str,
-    reply_context: Optional[str] = None
+    reply_context: Optional[str] = None,
+    history_limit: int = DEFAULT_HISTORY_LIMIT
 ):
-    """调用单个AI（使用异步版本，支持活动超时）"""
+    """
+    调用单个AI（使用异步版本，支持活动超时）
+
+    Args:
+        update: Telegram update
+        context: Telegram context
+        agent: AI名字
+        prompt: 用户问题
+        reply_context: 引用的消息内容
+        history_limit: 传递的历史条数
+    """
     emoji = AGENTS[agent]["emoji"]
     status_msg = await update.message.reply_text(f"{emoji} **{agent}** is thinking...")
+    chat_id = update.effective_chat.id
 
     try:
         role = AGENTS[agent]["role"]
 
-        # 如果有引用的消息，把它加入上下文
-        context_section = ""
+        # 构建上下文部分
+        context_parts = []
+
+        # 1. 获取并添加对话历史（不包括当前消息，因为已经在 prompt 里了）
+        history = get_chat_history(chat_id, history_limit)
+        # 排除最后一条（就是当前用户消息）
+        # 注意：历史记录可能被截断（超过1000字符会加...），所以比较时也要截断
+        if history and history[-1].get("role") == "user":
+            truncated_prompt = prompt[:1000] + "..." if len(prompt) > 1000 else prompt
+            if history[-1].get("content") == truncated_prompt:
+                history = history[:-1]
+        if history:
+            history_text = format_history_context(history)
+            context_parts.append(history_text)
+
+        # 2. 如果有引用的消息，也加入上下文
         if reply_context:
-            context_section = f"[Referenced message]:\n{reply_context}\n\n"
+            context_parts.append(f"[Referenced message]:\n{reply_context}\n")
+
+        context_section = "\n".join(context_parts)
 
         full_prompt = (
             f"You are {agent} ({role}).\n"
@@ -190,11 +288,13 @@ async def call_single_agent(
             f"User: {prompt}"
         )
 
-        chat_id = update.effective_chat.id
         # 使用异步版本，支持活动超时（有输出就重置计时器）
         response = await run_agent_cli_async(agent, full_prompt, chat_id)
 
         display_text, file_matches = process_ai_response(response)
+
+        # 保存 AI 回复到历史
+        add_to_history(chat_id, agent, display_text)
 
         response_text = f"{emoji} **[{md_escape(agent)}]**:\n\n{md_escape(display_text)}"
         await safe_send_message(
@@ -211,7 +311,7 @@ async def call_single_agent(
     except Exception as e:
         logger.error(f"Error calling {agent}: {e}")
         await context.bot.edit_message_text(
-            chat_id=update.effective_chat.id,
+            chat_id=chat_id,
             message_id=status_msg.message_id,
             text=f"{emoji} **[{agent}]**: Error: {str(e)}"
         )

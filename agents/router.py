@@ -140,15 +140,51 @@ class SmartRouter:
         )
 
     def _detect_mentioned_agents(self, message: str) -> List[str]:
-        """检测明确提及的AI名字"""
+        """
+        检测明确提及的AI名字（区分调用和引用）
+
+        调用模式（会触发AI）:
+        - @claude, claude:, claude，
+        - claude帮我, claude你, 问问claude
+        - codex和gemini你们觉得
+
+        引用模式（不触发AI）:
+        - claude说的, claude他, claude的回答
+        """
         message_lower = message.lower()
         agents = []
 
         for agent in AGENTS.keys():
-            # 匹配: claude, @claude, Claude:, claude，等
-            pattern = rf'(@?{agent.lower()})\s*[,，:：]?'
-            if re.search(pattern, message_lower):
+            agent_lower = agent.lower()
+
+            # 调用模式
+            call_patterns = [
+                rf'@{agent_lower}',                     # @claude
+                rf'{agent_lower}\s*[,，:：]',           # claude: 或 claude，
+                rf'{agent_lower}\s*(帮|你|来|看|觉得)',  # claude帮我, claude你觉得
+                rf'(问问|让|叫|请)\s*{agent_lower}',    # 问问claude
+                rf'{agent_lower}\s*(和|跟)\s*\w+',      # claude和codex
+                rf'\w+\s*(和|跟)\s*{agent_lower}',      # codex和claude
+            ]
+
+            # 引用模式（提及但不是调用）
+            ref_patterns = [
+                rf'{agent_lower}\s*(说的|说过|他说|她说|它说|的回答|的意见|的观点|的方案)',
+                rf'{agent_lower}\s*(他|她|它)(?!们)',    # claude他（但不是claude他们）
+            ]
+
+            is_call = any(re.search(p, message_lower) for p in call_patterns)
+            is_ref = any(re.search(p, message_lower) for p in ref_patterns)
+
+            # 调用模式匹配，且不是纯引用时才添加
+            # 如果同时匹配调用和引用，以调用为准（比如"claude你觉得claude说的对吗"应该触发claude）
+            if is_call and not is_ref:
                 agents.append(agent)
+            elif is_call and is_ref:
+                # 同时有调用和引用，检查调用是否在引用之前
+                # 简化处理：如果有明确的调用语法（@或冒号），优先触发
+                if re.search(rf'@{agent_lower}|{agent_lower}\s*[,，:：]', message_lower):
+                    agents.append(agent)
 
         return agents
 
