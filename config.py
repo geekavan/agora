@@ -72,13 +72,19 @@ MAX_TOTAL_TIMEOUT = 1800          # 最大总超时（秒）
 
 # ============= 路由配置 =============
 
-# 触发讨论模式的关键词
+# 触发讨论模式的关键词（需要和 DISCUSSION_TOPIC_KEYWORDS 一起出现才触发）
 DISCUSSION_KEYWORDS = [
     '讨论', '讨论下', '讨论一下', '讨论讨论',
     'discuss', 'debate',
     '你们商量', '你们聊聊', '你们说说',
     '大家说说', '一起分析', '集体讨论',
     '大家', '一起', '所有人'
+]
+
+# 讨论主题关键词（必须和上面的讨论关键词一起出现才触发圆桌讨论）
+DISCUSSION_TOPIC_KEYWORDS = [
+    '技术方案', '方案', '架构', '设计方案', '实现方案',
+    'technical', 'solution', 'architecture'
 ]
 
 # AI 意图检测关键词

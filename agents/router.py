@@ -13,6 +13,7 @@ from typing import List, Optional
 from config import (
     AGENTS,
     DISCUSSION_KEYWORDS,
+    DISCUSSION_TOPIC_KEYWORDS,
     AGENT_INTENT_KEYWORDS,
     DEFAULT_ROUTER_AGENT
 )
@@ -198,9 +199,17 @@ class SmartRouter:
         return cleaned.strip() or message
 
     def _should_start_discussion(self, message: str) -> bool:
-        """检测是否应该启动讨论模式"""
+        """
+        检测是否应该启动讨论模式
+
+        需要同时满足两个条件：
+        1. 包含讨论关键词（讨论、大家、一起等）
+        2. 包含主题关键词（技术方案、架构等）
+        """
         message_lower = message.lower()
-        return any(kw in message_lower for kw in DISCUSSION_KEYWORDS)
+        has_discussion_keyword = any(kw in message_lower for kw in DISCUSSION_KEYWORDS)
+        has_topic_keyword = any(kw in message_lower for kw in DISCUSSION_TOPIC_KEYWORDS)
+        return has_discussion_keyword and has_topic_keyword
 
     def _detect_intent_agents(self, message: str) -> List[str]:
         """根据意图关键词推断AI"""
