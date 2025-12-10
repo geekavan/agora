@@ -80,11 +80,18 @@ def format_history_context(history: list) -> str:
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理 /start 命令"""
     await update.message.reply_text(
-        "**Welcome to Agora (Real AI Version)**\n\n"
-        "Try saying: \"讨论一下如何实现登录功能\"\n\n"
-        "**智能路由**：直接发消息，系统会自动判断最合适的AI\n"
-        "**指定AI**：@Claude 或 @Codex 或 @Gemini\n"
-        "**并行调用**：claude和codex帮我看看这个代码",
+        "**Welcome to Agora**\n"
+        "多AI协作平台 - Claude / Codex / Gemini\n\n"
+        "**使用方式**\n"
+        "• 直接发消息 - 智能路由到最合适的AI\n"
+        "• @Claude / @Codex / @Gemini - 指定AI回答\n"
+        "• 同时提及多个AI - 并行调用对比回答\n"
+        "• 讨论(大家/一起) + 技术词(方案/架构) - 触发圆桌讨论\n\n"
+        "**命令**\n"
+        "/discuss <话题> - 发起AI圆桌讨论\n"
+        "/stop - 终止当前讨论\n"
+        "/sessions - 查看会话状态\n"
+        "/clear - 清空会话历史",
         parse_mode='Markdown'
     )
 
