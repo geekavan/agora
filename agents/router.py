@@ -14,7 +14,6 @@ from config import (
     AGENTS,
     DISCUSSION_KEYWORDS,
     DISCUSSION_TOPIC_KEYWORDS,
-    AGENT_INTENT_KEYWORDS,
     DEFAULT_ROUTER_AGENT
 )
 from session import get_last_agent
@@ -47,9 +46,11 @@ class SmartRouter:
     路由优先级：
     1. 明确提及AI名字 → 直接调用
     2. 回复了某个AI的消息 → 继续和那个AI对话
-    3. "讨论/大家/一起" → 圆桌讨论模式
-    4. 有最近对话记录 → 继续上一个AI
-    5. 都不匹配 → 用Claude做路由判断
+    3. "讨论" + 主题关键词 → 圆桌讨论模式
+    4. "大家/你们/我们/一起" → 同时调用所有AI
+    5. 有最近对话记录 → 继续上一个AI
+    6. 用Claude做路由判断（兜底）
+    7. 默认Claude
     """
 
     def __init__(self, chat_id: int):
@@ -102,13 +103,12 @@ class SmartRouter:
                 cleaned_prompt=cleaned_prompt
             )
 
-        # ========== 4. 根据意图推断AI ==========
-        intent_agents = self._detect_intent_agents(message)
-        if intent_agents:
+        # ========== 4. 检测多AI并行关键词（大家/你们/我们/一起） ==========
+        if self._should_call_all_agents(message):
             return RouteResult(
-                route_type=RouteType.MULTIPLE if len(intent_agents) > 1 else RouteType.SINGLE,
-                agents=intent_agents,
-                reason=f"意图推断: {', '.join(intent_agents)}",
+                route_type=RouteType.MULTIPLE,
+                agents=list(AGENTS.keys()),
+                reason="检测到多AI关键词，同时调用所有AI",
                 cleaned_prompt=cleaned_prompt
             )
 
@@ -140,12 +140,19 @@ class SmartRouter:
             cleaned_prompt=cleaned_prompt
         )
 
+    # AI名字的别名映射（用于容错拼写错误）
+    AGENT_ALIASES = {
+        "Claude": ["claude", "cluade", "calude", "cluade", "cladue", "cluad", "calud"],
+        "Codex": ["codex"],
+        "Gemini": ["gemini", "gimini", "gemni", "genmini"],
+    }
+
     def _detect_mentioned_agents(self, message: str) -> List[str]:
         """
         检测明确提及的AI名字（区分调用和引用）
 
         新逻辑：
-        1. 找出消息中所有出现的AI名字
+        1. 找出消息中所有出现的AI名字（包括常见拼写错误）
         2. 排除"引用模式"的AI（AI的、AI写的、AI说的等）
         3. 剩下的就是要调用的AI
 
@@ -158,18 +165,25 @@ class SmartRouter:
         agents = []
 
         for agent in AGENTS.keys():
-            agent_lower = agent.lower()
+            # 获取该AI的所有别名（包括正确拼写和常见错误）
+            aliases = self.AGENT_ALIASES.get(agent, [agent.lower()])
 
-            # 检查AI名字是否出现在消息中
-            if agent_lower not in message_lower:
+            # 检查任意别名是否出现在消息中
+            matched_alias = None
+            for alias in aliases:
+                if alias in message_lower:
+                    matched_alias = alias
+                    break
+
+            if not matched_alias:
                 continue
 
             # 引用模式：AI + 的，或 AI + 0~2字 + 的
             # 例如：claude的、gemini写的、codex生成的
-            ref_pattern = rf'{agent_lower}\s*\S{{0,2}}的'
+            ref_pattern = rf'{matched_alias}\s*\S{{0,2}}的'
 
             # 找到所有该AI出现的位置
-            all_mentions = list(re.finditer(rf'{agent_lower}', message_lower))
+            all_mentions = list(re.finditer(rf'{matched_alias}', message_lower))
             ref_mentions = list(re.finditer(ref_pattern, message_lower))
 
             # 如果有非引用的提及，就触发调用
@@ -180,12 +194,15 @@ class SmartRouter:
         return agents
 
     def _clean_prompt(self, message: str, agents: List[str]) -> str:
-        """清理prompt中的AI名字前缀"""
+        """清理prompt中的AI名字前缀（包括拼写错误的别名）"""
         cleaned = message
         for agent in agents:
-            # 移除 "@Claude: ", "claude，", "Claude " 等前缀
-            pattern = rf'@?{agent}\s*[,，:：]?\s*'
-            cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+            # 获取该AI的所有别名
+            aliases = self.AGENT_ALIASES.get(agent, [agent.lower()])
+            for alias in aliases:
+                # 移除 "@Claude: ", "cluade，", "calude " 等前缀
+                pattern = rf'@?{alias}\s*[,，:：]?\s*'
+                cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
         return cleaned.strip() or message
 
     def _should_start_discussion(self, message: str) -> bool:
@@ -201,16 +218,15 @@ class SmartRouter:
         has_topic_keyword = any(kw in message_lower for kw in DISCUSSION_TOPIC_KEYWORDS)
         return has_discussion_keyword and has_topic_keyword
 
-    def _detect_intent_agents(self, message: str) -> List[str]:
-        """根据意图关键词推断AI"""
+    def _should_call_all_agents(self, message: str) -> bool:
+        """
+        检测是否应该同时调用所有AI
+
+        触发关键词：大家、你们、我们、一起
+        """
         message_lower = message.lower()
-        agents = []
-
-        for agent, keywords in AGENT_INTENT_KEYWORDS.items():
-            if any(kw in message_lower for kw in keywords):
-                agents.append(agent)
-
-        return agents
+        all_agents_keywords = ['大家', '你们', '我们', '一起']
+        return any(kw in message_lower for kw in all_agents_keywords)
 
     async def _ai_route(self, message: str) -> List[str]:
         """
