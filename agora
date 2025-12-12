@@ -125,4 +125,4 @@ export PROJECT_ROOT="$PROJECT_PATH"
 
 # 切换到 Agora 目录并启动
 cd "$AGORA_HOME"
-python3 main.py
+exec -a agora python3 main.py
