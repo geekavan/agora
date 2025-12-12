@@ -32,7 +32,7 @@ AGENTS = {
     "Codex": {
         "role": "Lead Developer",
         "emoji": "❇️",
-        "command_template": ["codex", "exec", "resume", "{session_id}"],
+        "command_template": ["codex", "exec", "--skip-git-repo-check", "resume", "{session_id}"],
         "create_command": ["codex", "exec", "--skip-git-repo-check", "--full-auto"],
         "needs_uuid": False,
     },
@@ -51,8 +51,13 @@ DEFAULT_ROUTER_AGENT = "Claude"
 
 # ============= 讨论配置 =============
 
-MAX_ROUNDS = 5                    # 最大讨论轮次
-CONVERGENCE_SCORE = 90            # 收敛分数阈值（达到此分数即结束）
+# 最大讨论轮次（可通过命令行参数 -r 修改，最大限制为10）
+_max_rounds = int(os.getenv("AGORA_MAX_ROUNDS", "5"))
+MAX_ROUNDS = min(_max_rounds, 10)  # 限制最大值为10
+
+# 收敛分数阈值（可通过命令行参数 -s 修改）
+CONVERGENCE_SCORE = int(os.getenv("AGORA_CONVERGENCE_SCORE", "90"))
+
 CONVERGENCE_DELTA = 5             # 收敛增幅阈值（连续2轮提升小于此值即结束）
 
 # ============= 项目配置 =============

@@ -209,11 +209,18 @@ class SmartRouter:
         """
         检测是否应该启动讨论模式
 
-        需要同时满足两个条件：
-        1. 包含讨论关键词（讨论、大家、一起等）
-        2. 包含主题关键词（技术方案、架构等）
+        触发条件（满足任一即可）：
+        1. 包含直接触发词："圆桌讨论"或"圆桌会议"
+        2. 同时包含讨论关键词（讨论、大家、一起等）和主题关键词（技术方案、架构等）
         """
         message_lower = message.lower()
+
+        # 直接触发词
+        direct_triggers = ['圆桌讨论', '圆桌会议']
+        if any(trigger in message_lower for trigger in direct_triggers):
+            return True
+
+        # 原有逻辑：讨论关键词 + 主题关键词
         has_discussion_keyword = any(kw in message_lower for kw in DISCUSSION_KEYWORDS)
         has_topic_keyword = any(kw in message_lower for kw in DISCUSSION_TOPIC_KEYWORDS)
         return has_discussion_keyword and has_topic_keyword

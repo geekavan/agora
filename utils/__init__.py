@@ -2,6 +2,7 @@ from .markdown import md_escape
 from .project import get_project_tree, get_project_context
 from .telegram import safe_send_message
 from .file_writer import handle_file_write_requests, handle_file_write_callback
+from .helpers import format_agent_name, get_agent_emoji
 
 __all__ = [
     'md_escape',
@@ -9,5 +10,7 @@ __all__ = [
     'get_project_context',
     'safe_send_message',
     'handle_file_write_requests',
-    'handle_file_write_callback'
+    'handle_file_write_callback',
+    'format_agent_name',
+    'get_agent_emoji'
 ]

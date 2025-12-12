@@ -272,7 +272,8 @@ async def run_roundtable_discussion(
                 # 解析每个方案的评分
                 for agent in AGENTS.keys():
                     # 尝试找到对该agent方案的评分
-                    pattern = rf'{agent}.*?<SCORE>\s*(\d+)\s*</SCORE>'
+                    # 限制agent名字和SCORE标签之间最多200个字符，避免误匹配
+                    pattern = rf'{agent}.{{0,200}}?<SCORE>\s*(\d+)\s*</SCORE>'
                     match = re.search(pattern, response, re.IGNORECASE | re.DOTALL)
                     if match:
                         score = int(match.group(1))

@@ -8,6 +8,7 @@ from .manager import (
     get_last_agent,
     set_last_agent,
     session_locks,
+    _session_locks_creation_lock,
     add_to_history,
     get_chat_history,
     clear_chat_history

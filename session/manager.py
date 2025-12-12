@@ -28,11 +28,13 @@ MAX_HISTORY_SIZE = 20
 
 # 并发锁字典: {(chat_id, agent_name): Lock}
 session_locks: Dict[tuple, threading.Lock] = {}
+# 保护 session_locks 字典本身的并发访问
+_session_locks_creation_lock = threading.Lock()
 
 # ============= 防抖保存机制 =============
 _save_timer: Optional[threading.Timer] = None
 _save_lock = threading.Lock()
-_SAVE_DELAY = 2.0  # 延迟2秒保存，合并多次调用
+_SAVE_DELAY = 0.5  # 缩短到0.5秒以降低数据丢失风险（原2.0秒）
 
 
 def load_sessions():

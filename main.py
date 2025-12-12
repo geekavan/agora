@@ -33,6 +33,7 @@ from bot import (
     smart_message_handler,
     button_callback
 )
+from agents.runner import active_processes, active_processes_lock
 
 # 日志配置
 logging.basicConfig(
@@ -70,14 +71,28 @@ def signal_handler(signum, frame):
     except Exception as e:
         print(f"保存会话失败: {e}")
 
-    # 清理子进程
-    print("清理子进程...")
+    # 清理Agora启动的AI子进程
+    print("清理AI子进程...")
     try:
-        subprocess.run(["pkill", "-9", "-f", "gemini"], stderr=subprocess.DEVNULL)
-        subprocess.run(["pkill", "-9", "-f", "codex"], stderr=subprocess.DEVNULL)
-        subprocess.run(["pkill", "-9", "-f", "claude"], stderr=subprocess.DEVNULL)
-    except Exception:
-        pass  # 忽略清理子进程时的错误
+        # 终止所有活跃的异步进程（由run_agent_cli_async创建）
+        killed_count = 0
+        for process_key, process in list(active_processes.items()):
+            try:
+                if process and process.returncode is None:
+                    chat_id, agent_name = process_key
+                    print(f"  终止进程: {agent_name} (chat {chat_id})")
+                    process.kill()
+                    killed_count += 1
+            except Exception as e:
+                logger.debug(f"清理进程 {process_key} 时出错: {e}")
+
+        if killed_count > 0:
+            print(f"  已终止 {killed_count} 个AI进程")
+        else:
+            print("  没有活跃的AI进程需要清理")
+
+    except Exception as e:
+        print(f"清理进程时出错: {e}")
 
     print("再见！")
     sys.exit(0)

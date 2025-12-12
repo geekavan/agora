@@ -15,25 +15,36 @@ AGORA_HOME="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 # 默认使用当前工作目录作为项目路径
 PROJECT_PATH="$(pwd)"
 CUSTOM_PATH=""
+MAX_ROUNDS=""
+CONVERGENCE_SCORE=""
 
 # 解析命令行参数
-while getopts "p:h" opt; do
+while getopts "p:r:s:h" opt; do
   case $opt in
     p)
       CUSTOM_PATH="$OPTARG"
       PROJECT_PATH="$OPTARG"
       ;;
+    r)
+      MAX_ROUNDS="$OPTARG"
+      ;;
+    s)
+      CONVERGENCE_SCORE="$OPTARG"
+      ;;
     h)
       echo "Agora - AI圆桌会议系统"
       echo ""
-      echo "用法: agora [-p 项目路径]"
+      echo "用法: agora [-p 项目路径] [-r 轮次] [-s 分数]"
       echo ""
       echo "选项:"
       echo "  -p PATH    指定项目路径（默认：当前目录）"
+      echo "  -r ROUNDS  设置最大讨论轮次（默认：5，最大：10）"
+      echo "  -s SCORE   设置收敛分数阈值（默认：90）"
       echo "  -h         显示帮助"
       echo ""
       echo "示例:"
       echo "  agora                           # 使用当前目录"
+      echo "  agora -r 10 -s 100              # 设置10轮，100分收敛"
       echo "  cd /path/to/project && agora    # 在项目目录运行"
       echo "  agora -p /path/to/project       # 指定路径"
       echo ""
@@ -122,6 +133,17 @@ echo ""
 
 # 设置项目路径环境变量
 export PROJECT_ROOT="$PROJECT_PATH"
+
+# 设置讨论配置（如果指定）
+if [ -n "$MAX_ROUNDS" ]; then
+    export AGORA_MAX_ROUNDS="$MAX_ROUNDS"
+    echo "⚙️  最大讨论轮次: $MAX_ROUNDS"
+fi
+
+if [ -n "$CONVERGENCE_SCORE" ]; then
+    export AGORA_CONVERGENCE_SCORE="$CONVERGENCE_SCORE"
+    echo "⚙️  收敛分数阈值: $CONVERGENCE_SCORE"
+fi
 
 # 切换到 Agora 目录并启动
 cd "$AGORA_HOME"

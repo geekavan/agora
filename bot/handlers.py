@@ -283,13 +283,11 @@ async def call_single_agent(
         context_parts = []
 
         # 1. 获取并添加对话历史（不包括当前消息，因为已经在 prompt 里了）
-        history = get_chat_history(chat_id, history_limit)
-        # 排除最后一条（就是当前用户消息）
-        # 注意：历史记录可能被截断（超过1000字符会加...），所以比较时也要截断
+        # 获取 history_limit + 1 条，然后排除最后一条（当前用户消息）
+        history = get_chat_history(chat_id, history_limit + 1)
+        # 排除最后一条用户消息（刚在 smart_message_handler 中添加的）
         if history and history[-1].get("role") == "user":
-            truncated_prompt = prompt[:1000] + "..." if len(prompt) > 1000 else prompt
-            if history[-1].get("content") == truncated_prompt:
-                history = history[:-1]
+            history = history[:-1]
         if history:
             history_text = format_history_context(history)
             context_parts.append(history_text)

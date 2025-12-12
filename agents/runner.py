@@ -20,10 +20,18 @@ from session import (
     clear_chat_sessions,
     extract_session_id_from_output,
     set_last_agent,
-    session_locks
+    session_locks,
+    _session_locks_creation_lock
 )
 
 logger = logging.getLogger(__name__)
+
+# ============= 错误消息常量 =============
+ERROR_SESSION_EXPIRED = "[Error]: Session expired or invalid. Please retry."
+ERROR_NO_RESPONSE = "[Error]: No response from agent (possible network issue). Please retry."
+ERROR_TIMEOUT = "[Error]: {agent} 响应超时"
+ERROR_CANCELLED = "[已取消]: 操作被用户中断"
+ERROR_GENERAL = "[Error]: {error}"
 
 # 活跃进程 {(chat_id, agent_name): asyncio.subprocess.Process}
 active_processes = {}
@@ -132,12 +140,12 @@ def _handle_cli_error(agent_name: str, chat_id: int, returncode: int, stderr: st
         if "session" in error_msg.lower():
             if any(kw in error_msg.lower() for kw in ["not found", "invalid", "expired"]):
                 clear_chat_sessions(chat_id, agent_name)
-                return "[Error]: Session expired or invalid. Please retry."
+                return ERROR_SESSION_EXPIRED
 
-        return f"[Error]: {error_msg}"
+        return ERROR_GENERAL.format(error=error_msg)
 
     if not output:
-        return "[Error]: No response from agent (possible network issue). Please retry."
+        return ERROR_NO_RESPONSE
 
     return None
 
@@ -149,10 +157,14 @@ def run_agent_cli(agent_name: str, prompt: str, chat_id: int) -> str:
     """
     # 并发保护：同一个chat+agent的调用串行化
     key = (chat_id, agent_name)
-    if key not in session_locks:
-        session_locks[key] = threading.Lock()
 
-    with session_locks[key]:
+    # 使用全局锁保护 session_locks 字典的并发访问
+    with _session_locks_creation_lock:
+        if key not in session_locks:
+            session_locks[key] = threading.Lock()
+        lock = session_locks[key]
+
+    with lock:
         agent_config = AGENTS[agent_name]
         cmd, session_id, is_first_call = _build_command(agent_name, chat_id)
         cmd.append(prompt)
@@ -185,10 +197,10 @@ def run_agent_cli(agent_name: str, prompt: str, chat_id: int) -> str:
             return output
 
         except subprocess.TimeoutExpired:
-            return f"[Error]: {agent_name} 响应超时"
+            return ERROR_TIMEOUT.format(agent=agent_name)
         except Exception as e:
             logger.error(f"Error running {agent_name}: {e}")
-            return f"[Error]: {str(e)}"
+            return ERROR_GENERAL.format(error=str(e))
 
 
 def process_ai_response(response: str) -> Tuple[str, List[Tuple[str, str]]]:
@@ -253,7 +265,7 @@ async def run_agent_cli_async(
 
         # 检查是否被取消
         if cancel_event and cancel_event.is_set():
-            return "[已取消]: 操作被用户中断"
+            return ERROR_CANCELLED
 
         output = _process_output(stdout_data, stderr_data)
 
@@ -271,11 +283,11 @@ async def run_agent_cli_async(
         if process and process.returncode is None:
             process.kill()
             await process.wait()
-        return "[已取消]: 操作被用户中断"
+        return ERROR_CANCELLED
 
     except Exception as e:
         logger.error(f"Error running {agent_name}: {e}")
-        return f"[Error]: {str(e)}"
+        return ERROR_GENERAL.format(error=str(e))
 
     finally:
         # 清理活跃进程
