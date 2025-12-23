@@ -66,68 +66,66 @@ def build_proposal_prompt(agent: str, topic: str, round_num: int, base_proposal:
     role = AGENTS[agent]["role"]
 
     if round_num == 1:
-        return f"""你是 {agent} ({role})，参与技术方案讨论。
+        return f"""你是 {agent} ({role})。
 
 {project_context}
 
-【议题】
+【议题/讨论对象】
 {topic}
 
 【任务】
-给出你的技术方案，要求：
-1. 结构清晰，markdown格式
-2. 包含具体实现思路
-3. 如需写文件用 <WRITE_FILE path="...">内容</WRITE_FILE>
-
-直接输出方案，不要废话。"""
+请基于你的专业视角（{role}），对上述议题进行深入分析、点评或提出解决方案。
+不需要局限于“技术方案”，如果是代码则进行Review，如果是问题则分析原因。
+请直接输出你的核心观点或分析结果。"""
     else:
-        return f"""你是 {agent} ({role})，基于上一轮最佳方案进行优化。
+        return f"""你是 {agent} ({role})。
 
 【议题】
 {topic}
 
-【当前最佳方案】
+【上一轮的高分观点/方案】
 {base_proposal}
 
 【任务】
-优化上述方案，可以：
-1. 补充遗漏的细节
-2. 改进实现方式
-3. 修正潜在问题
+参考上述内容，结合你的专业视角，进行补充、修正或提出进一步的分析。
+你可以：
+1. 指出上述观点中被忽视的问题（如安全、性能、架构缺陷）
+2. 提供具体的实现细节或改进建议
+3. 如果完全同意，请总结并确认最终结论
 
-直接输出优化后的完整方案。"""
+直接输出你的分析或完善后的内容。"""
 
 
 def build_review_prompt(reviewer: str, topic: str, proposals_text: str) -> str:
     """构建评审prompt"""
     role = AGENTS[reviewer]["role"]
 
-    return f"""你是 {reviewer} ({role})，评审以下技术方案。
+    return f"""你是 {reviewer} ({role})，请评审以下观点或方案。
 
 【议题】
 {topic}
 
-【待评审方案】
+【待评审内容】
 {proposals_text}
 
 【任务】
-对每个方案评分(0-100)并给出改进建议。
+基于你的专业视角，对每个观点的**质量、准确性和价值**进行评分(0-100)并给出简短点评。
 
-【输出格式】严格按以下格式，每个方案一个：
+【输出格式】严格按以下格式，每个对象一个：
 
-## Claude 的方案
+## Claude 的观点
 <SCORE>85</SCORE>
-改进建议：xxx
+点评：xxx
 
-## Gemini 的方案
+## Gemini 的观点
 <SCORE>78</SCORE>
-改进建议：xxx
+点评：xxx
 
-## Codex 的方案
+## Codex 的观点
 <SCORE>90</SCORE>
-改进建议：xxx
+点评：xxx
 
-⚠️ 注意：<SCORE>标签内只写数字，如 <SCORE>85</SCORE>，不要写成 <85分数</85分数> 这种错误格式！
+⚠️ 注意：<SCORE>标签内只写数字。
 
 直接输出评审结果。"""
 

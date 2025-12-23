@@ -230,20 +230,20 @@ async def smart_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
     # 根据路由结果执行
     if route_result.route_type == RouteType.DISCUSSION:
         # 讨论模式暂不传历史（讨论本身就是多轮）
-        await run_roundtable_discussion(update, context, route_result.cleaned_prompt)
+        # 讨论模式也改为后台运行，防止长时间占用
+        asyncio.create_task(run_roundtable_discussion(update, context, route_result.cleaned_prompt))
 
     elif route_result.route_type in (RouteType.SINGLE, RouteType.MULTIPLE):
         # 保存用户消息到历史
         add_to_history(chat_id, "user", route_result.cleaned_prompt)
 
-        # 并行调用所有AI
-        tasks = []
+        # 后台并发调用所有AI（Fire-and-forget）
+        # handlers立即返回，允许用户发送下一条消息
         for agent in route_result.agents:
-            tasks.append(call_single_agent(
+            asyncio.create_task(call_single_agent(
                 update, context, agent, route_result.cleaned_prompt,
                 reply_context, history_limit
             ))
-        await asyncio.gather(*tasks)
 
     else:
         # NONE - 不应该发生，但以防万一

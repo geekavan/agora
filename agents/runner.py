@@ -37,6 +37,11 @@ ERROR_GENERAL = "[Error]: {error}"
 active_processes = {}
 active_processes_lock = asyncio.Lock()
 
+# 异步会话锁 {(chat_id, agent_name): asyncio.Lock}
+# 用于确保同一个会话的异步请求串行执行
+async_session_locks = {}
+async_session_locks_lock = asyncio.Lock()
+
 
 # ============= 公共辅助函数 =============
 
@@ -228,71 +233,81 @@ async def run_agent_cli_async(
     异步版本的 AI CLI 调用，支持：
     1. 活动超时：有输出就重置计时器
     2. 可取消：通过 cancel_event 立即终止
+    3. 自动排队：同一会话的请求自动串行化
     """
-    agent_config = AGENTS[agent_name]
-    cmd, session_id, is_first_call = _build_command(agent_name, chat_id)
-    cmd.append(prompt)
+    # 获取或创建异步锁
+    lock_key = (chat_id, agent_name)
+    async with async_session_locks_lock:
+        if lock_key not in async_session_locks:
+            async_session_locks[lock_key] = asyncio.Lock()
+        lock = async_session_locks[lock_key]
 
-    env = _prepare_env()
-    process = None
-    process_key = (chat_id, agent_name)
+    # 使用锁确保同一会话串行执行
+    async with lock:
+        agent_config = AGENTS[agent_name]
+        cmd, session_id, is_first_call = _build_command(agent_name, chat_id)
+        cmd.append(prompt)
 
-    try:
-        # 创建异步进程
-        stdin_mode = asyncio.subprocess.PIPE if agent_config.get("needs_stdin_close") else None
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            stdin=stdin_mode,
-            env=env,
-            cwd=PROJECT_ROOT
-        )
+        env = _prepare_env()
+        process = None
+        process_key = (chat_id, agent_name)
 
-        # 注册活跃进程（用于取消）
-        async with active_processes_lock:
-            active_processes[process_key] = process
+        try:
+            # 创建异步进程
+            stdin_mode = asyncio.subprocess.PIPE if agent_config.get("needs_stdin_close") else None
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                stdin=stdin_mode,
+                env=env,
+                cwd=PROJECT_ROOT
+            )
 
-        # 如果需要关闭 stdin
-        if agent_config.get("needs_stdin_close") and process.stdin:
-            process.stdin.close()
-            await process.stdin.wait_closed()
+            # 注册活跃进程（用于取消）
+            async with active_processes_lock:
+                active_processes[process_key] = process
 
-        # 使用活动超时机制读取输出
-        stdout_data, stderr_data = await _read_with_activity_timeout(
-            process, cancel_event, IDLE_TIMEOUT, MAX_TOTAL_TIMEOUT
-        )
+            # 如果需要关闭 stdin
+            if agent_config.get("needs_stdin_close") and process.stdin:
+                process.stdin.close()
+                await process.stdin.wait_closed()
 
-        # 检查是否被取消
-        if cancel_event and cancel_event.is_set():
+            # 使用活动超时机制读取输出
+            stdout_data, stderr_data = await _read_with_activity_timeout(
+                process, cancel_event, IDLE_TIMEOUT, MAX_TOTAL_TIMEOUT
+            )
+
+            # 检查是否被取消
+            if cancel_event and cancel_event.is_set():
+                return ERROR_CANCELLED
+
+            output = _process_output(stdout_data, stderr_data)
+
+            # 检查错误
+            error = _handle_cli_error(agent_name, chat_id, process.returncode, stderr_data, output)
+            if error:
+                return error
+
+            # 保存会话
+            _handle_session_save(agent_name, chat_id, session_id, is_first_call, stdout_data, stderr_data)
+
+            return output
+
+        except asyncio.CancelledError:
+            if process and process.returncode is None:
+                process.kill()
+                await process.wait()
             return ERROR_CANCELLED
 
-        output = _process_output(stdout_data, stderr_data)
+        except Exception as e:
+            logger.error(f"Error running {agent_name}: {e}")
+            return ERROR_GENERAL.format(error=str(e))
 
-        # 检查错误
-        error = _handle_cli_error(agent_name, chat_id, process.returncode, stderr_data, output)
-        if error:
-            return error
-
-        # 保存会话
-        _handle_session_save(agent_name, chat_id, session_id, is_first_call, stdout_data, stderr_data)
-
-        return output
-
-    except asyncio.CancelledError:
-        if process and process.returncode is None:
-            process.kill()
-            await process.wait()
-        return ERROR_CANCELLED
-
-    except Exception as e:
-        logger.error(f"Error running {agent_name}: {e}")
-        return ERROR_GENERAL.format(error=str(e))
-
-    finally:
-        # 清理活跃进程
-        async with active_processes_lock:
-            active_processes.pop(process_key, None)
+        finally:
+            # 清理活跃进程
+            async with active_processes_lock:
+                active_processes.pop(process_key, None)
 
 
 async def _read_with_activity_timeout(
