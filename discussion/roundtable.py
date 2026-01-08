@@ -16,8 +16,10 @@ from .state import DiscussionState
 
 logger = logging.getLogger(__name__)
 
+# 全局状态（带锁保护）
 active_discussions = {}
 cancel_events = {}
+_discussions_lock = asyncio.Lock()
 
 
 async def _wait_for_tasks_with_cancel(
@@ -27,7 +29,7 @@ async def _wait_for_tasks_with_cancel(
     update: 'Update'
 ) -> bool:
     """
-    等待任务完成，同时检查取消事件
+    并行等待所有任务完成，同时支持取消
 
     Args:
         tasks: [(name, task), ...] 任务列表
@@ -38,27 +40,69 @@ async def _wait_for_tasks_with_cancel(
     Returns:
         True 如果被取消，False 如果正常完成
     """
-    for name, task in tasks:
-        # 检查是否需要取消
-        if discussion.stopped or cancel_event.is_set():
+    if not tasks:
+        return False
+
+    task_list = [t for _, t in tasks]
+
+    # 创建取消监控任务
+    async def cancel_monitor():
+        while not cancel_event.is_set() and not discussion.stopped:
+            await asyncio.sleep(0.1)
+        return "cancelled"
+
+    monitor_task = asyncio.create_task(cancel_monitor())
+
+    try:
+        # 使用 asyncio.wait 并行等待所有任务，同时监控取消事件
+        all_tasks = task_list + [monitor_task]
+        done, pending = await asyncio.wait(
+            all_tasks,
+            return_when=asyncio.FIRST_COMPLETED
+        )
+
+        # 检查是否是取消监控任务先完成
+        if monitor_task in done:
             # 取消所有未完成的任务
-            for _, t in tasks:
-                if not t.done():
-                    t.cancel()
+            for t in pending:
+                t.cancel()
+            # 等待取消完成
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
             await update.message.reply_text("讨论已中断。")
             return True
 
-        # 等待当前任务完成
-        while not task.done():
-            if discussion.stopped or cancel_event.is_set():
-                for _, t in tasks:
-                    if not t.done():
-                        t.cancel()
-                await update.message.reply_text("讨论已中断。")
-                return True
-            await asyncio.sleep(0.5)
+        # 如果是其他任务先完成，继续等待剩余任务
+        if pending:
+            # 移除监控任务
+            remaining = [t for t in pending if t != monitor_task]
+            if remaining:
+                # 继续等待其他任务，但也监控取消
+                while remaining:
+                    if discussion.stopped or cancel_event.is_set():
+                        for t in remaining:
+                            t.cancel()
+                        await asyncio.gather(*remaining, return_exceptions=True)
+                        await update.message.reply_text("讨论已中断。")
+                        return True
 
-    return False
+                    done_now, remaining_set = await asyncio.wait(
+                        remaining,
+                        timeout=0.5,
+                        return_when=asyncio.FIRST_COMPLETED
+                    )
+                    remaining = list(remaining_set)
+
+        return False
+
+    finally:
+        # 确保监控任务被清理
+        if not monitor_task.done():
+            monitor_task.cancel()
+            try:
+                await monitor_task
+            except asyncio.CancelledError:
+                pass
 
 
 def build_proposal_prompt(agent: str, topic: str, round_num: int, base_proposal: str = "", project_context: str = "") -> str:
@@ -138,14 +182,16 @@ async def run_roundtable_discussion(
     """运行圆桌讨论（评分迭代机制）"""
     chat_id = update.effective_chat.id
 
-    if chat_id in active_discussions:
-        await update.message.reply_text("当前已有活跃讨论，使用 /stop 停止。")
-        return
+    # 使用锁保护全局状态的读写
+    async with _discussions_lock:
+        if chat_id in active_discussions:
+            await update.message.reply_text("当前已有活跃讨论，使用 /stop 停止。")
+            return
 
-    discussion = DiscussionState(topic, chat_id)
-    active_discussions[chat_id] = discussion
-    cancel_event = asyncio.Event()
-    cancel_events[chat_id] = cancel_event
+        discussion = DiscussionState(topic, chat_id)
+        active_discussions[chat_id] = discussion
+        cancel_event = asyncio.Event()
+        cancel_events[chat_id] = cancel_event
 
     await update.message.reply_text(
         f"**圆桌讨论开始**\n\n"
@@ -321,6 +367,7 @@ async def run_roundtable_discussion(
                     text=final_text,
                     file_name=f"final_proposal_{best.agent}"
                 )
+                logger.info(f"讨论结束 [chat={chat_id}]: {reason}, winner={best.agent}, score={discussion.final_score:.1f}")
                 return
 
         # 达到最大轮次
@@ -337,30 +384,35 @@ async def run_roundtable_discussion(
                 text=max_round_text,
                 file_name=f"final_proposal_{best.agent}"
             )
+            logger.info(f"讨论结束 [chat={chat_id}]: 达到最大轮次, winner={best.agent}, score={best.avg_score:.1f}")
 
     finally:
-        active_discussions.pop(chat_id, None)
-        cancel_events.pop(chat_id, None)
+        # 使用锁保护清理操作
+        async with _discussions_lock:
+            active_discussions.pop(chat_id, None)
+            cancel_events.pop(chat_id, None)
 
 
 async def stop_discussion_async(chat_id: int) -> bool:
     """异步停止讨论"""
     stopped = False
 
-    if chat_id in active_discussions:
-        active_discussions[chat_id].stopped = True
-        stopped = True
+    async with _discussions_lock:
+        if chat_id in active_discussions:
+            active_discussions[chat_id].stopped = True
+            stopped = True
 
-    if chat_id in cancel_events:
-        cancel_events[chat_id].set()
-        stopped = True
+        if chat_id in cancel_events:
+            cancel_events[chat_id].set()
+            stopped = True
 
     killed = await kill_agent_process(chat_id)
     if killed:
         stopped = True
 
-    # 立即清理活跃状态，避免卡住无法重新开始
-    active_discussions.pop(chat_id, None)
-    cancel_events.pop(chat_id, None)
+    # 清理活跃状态
+    async with _discussions_lock:
+        active_discussions.pop(chat_id, None)
+        cancel_events.pop(chat_id, None)
 
     return stopped

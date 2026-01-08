@@ -1,6 +1,7 @@
 from .handlers import (
     cmd_start,
     cmd_discuss,
+    cmd_debate,
     cmd_stop,
     cmd_ls,
     cmd_clear_session,
@@ -13,6 +14,7 @@ from .callbacks import button_callback, handle_file_write_requests
 __all__ = [
     'cmd_start',
     'cmd_discuss',
+    'cmd_debate',
     'cmd_stop',
     'cmd_ls',
     'cmd_clear_session',

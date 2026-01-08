@@ -12,8 +12,7 @@ from typing import List, Optional
 
 from config import (
     AGENTS,
-    DISCUSSION_KEYWORDS,
-    DISCUSSION_TOPIC_KEYWORDS,
+    DEBATE_KEYWORDS,
     DEFAULT_ROUTER_AGENT
 )
 from session import get_last_agent
@@ -27,6 +26,7 @@ class RouteType(Enum):
     SINGLE = "single"           # 单个AI
     MULTIPLE = "multiple"       # 多个AI并行
     DISCUSSION = "discussion"   # 圆桌讨论
+    DEBATE = "debate"           # 辩论模式
     NONE = "none"               # 无法路由
 
 
@@ -94,7 +94,16 @@ class SmartRouter:
                 cleaned_prompt=cleaned_prompt
             )
 
-        # ========== 3. 检测讨论模式关键词 ==========
+        # ========== 3. 检测辩论模式关键词 ==========
+        if self._should_start_debate(message):
+            return RouteResult(
+                route_type=RouteType.DEBATE,
+                agents=list(AGENTS.keys()),
+                reason="检测到辩论关键词",
+                cleaned_prompt=cleaned_prompt
+            )
+
+        # ========== 4. 检测讨论模式关键词 ==========
         if self._should_start_discussion(message):
             return RouteResult(
                 route_type=RouteType.DISCUSSION,
@@ -103,7 +112,7 @@ class SmartRouter:
                 cleaned_prompt=cleaned_prompt
             )
 
-        # ========== 4. 检测多AI并行关键词（大家/你们/我们/一起） ==========
+        # ========== 5. 检测多AI并行关键词（大家/你们/我们/一起） ==========
         if self._should_call_all_agents(message):
             return RouteResult(
                 route_type=RouteType.MULTIPLE,
@@ -112,7 +121,7 @@ class SmartRouter:
                 cleaned_prompt=cleaned_prompt
             )
 
-        # ========== 5. 继续上一个AI的对话 ==========
+        # ========== 6. 继续上一个AI的对话 ==========
         last_agent = get_last_agent(self.chat_id)
         if last_agent and last_agent in AGENTS:
             return RouteResult(
@@ -122,7 +131,7 @@ class SmartRouter:
                 cleaned_prompt=cleaned_prompt
             )
 
-        # ========== 6. 使用Claude做智能路由判断 ==========
+        # ========== 7. 使用Claude做智能路由判断 ==========
         routed_agents = await self._ai_route(message)
         if routed_agents:
             return RouteResult(
@@ -132,7 +141,7 @@ class SmartRouter:
                 cleaned_prompt=cleaned_prompt
             )
 
-        # ========== 7. 默认使用Claude ==========
+        # ========== 8. 默认使用Claude ==========
         return RouteResult(
             route_type=RouteType.SINGLE,
             agents=[DEFAULT_ROUTER_AGENT],
@@ -205,25 +214,25 @@ class SmartRouter:
                 cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
         return cleaned.strip() or message
 
-    def _should_start_discussion(self, message: str) -> bool:
+    def _should_start_debate(self, message: str) -> bool:
         """
-        检测是否应该启动讨论模式
+        检测是否应该启动辩论模式
 
-        触发条件（满足任一即可）：
-        1. 包含直接触发词："圆桌讨论"或"圆桌会议"
-        2. 同时包含讨论关键词（讨论、大家、一起等）和主题关键词（技术方案、架构等）
+        触发条件：包含辩论关键词
         """
         message_lower = message.lower()
+        return any(kw in message_lower for kw in DEBATE_KEYWORDS)
 
-        # 直接触发词
+    def _should_start_discussion(self, message: str) -> bool:
+        """
+        检测是否应该启动圆桌讨论模式
+
+        触发条件：必须包含"圆桌讨论"或"圆桌会议"
+        其他如"大家、一起、你们"只会触发多AI并行调用，不触发圆桌讨论
+        """
+        message_lower = message.lower()
         direct_triggers = ['圆桌讨论', '圆桌会议']
-        if any(trigger in message_lower for trigger in direct_triggers):
-            return True
-
-        # 原有逻辑：讨论关键词 + 主题关键词
-        has_discussion_keyword = any(kw in message_lower for kw in DISCUSSION_KEYWORDS)
-        has_topic_keyword = any(kw in message_lower for kw in DISCUSSION_TOPIC_KEYWORDS)
-        return has_discussion_keyword and has_topic_keyword
+        return any(trigger in message_lower for trigger in direct_triggers)
 
     def _should_call_all_agents(self, message: str) -> bool:
         """

@@ -20,11 +20,12 @@ from telegram.ext import (
 )
 from telegram.request import HTTPXRequest
 
-from config import BOT_TOKEN, PROXY_URL, PROJECT_ROOT, AGENTS, MAX_ROUNDS
+from config import BOT_TOKEN, PROXY_URL, PROJECT_ROOT, AGENTS, MAX_ROUNDS, validate_config, get_config_summary
 from session import load_sessions, save_sessions, SESSION_FILE
 from bot import (
     cmd_start,
     cmd_discuss,
+    cmd_debate,
     cmd_stop,
     cmd_ls,
     cmd_clear_session,
@@ -103,10 +104,16 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
-        logger.error("错误: 请设置 TELEGRAM_BOT_TOKEN 环境变量或在 .env 文件中配置!")
-        logger.error("   例如: export TELEGRAM_BOT_TOKEN='你的Token'")
+    # 配置验证
+    config_errors = validate_config()
+    if config_errors:
+        logger.error("配置验证失败:")
+        for err in config_errors:
+            logger.error(f"  - {err}")
         return
+
+    # 打印配置摘要
+    logger.info(get_config_summary())
 
     # 加载会话数据
     logger.info("Loading sessions...")
@@ -125,6 +132,7 @@ def main():
     # 添加命令处理器
     application.add_handler(CommandHandler('start', cmd_start))
     application.add_handler(CommandHandler('discuss', cmd_discuss))
+    application.add_handler(CommandHandler('debate', cmd_debate))
     application.add_handler(CommandHandler('stop', cmd_stop))
     application.add_handler(CommandHandler('ls', cmd_ls))
     application.add_handler(CommandHandler('clear_session', cmd_clear_session))
@@ -151,8 +159,9 @@ def main():
     print("=" * 50)
     print("Smart routing enabled:")
     print("  - Direct mention: @Claude, @Codex, @Gemini")
-    print("  - Parallel call: 'claude和codex帮我看看'")
-    print("  - Discussion: '大家讨论一下'")
+    print("  - Parallel call: '大家/一起/你们' 同时调用所有AI")
+    print("  - Roundtable: '圆桌讨论/圆桌会议' 触发圆桌讨论")
+    print("  - Debate: '辩论/debate/vs' 触发AI辩论赛")
     print("  - Auto continue: continues with last AI")
     print("  - AI routing: Claude decides when unclear")
     print("=" * 50)

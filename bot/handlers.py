@@ -21,6 +21,7 @@ from session import (
 from agents import run_agent_cli_async, SmartRouter, RouteType
 from agents.runner import process_ai_response
 from discussion import run_roundtable_discussion, stop_discussion_async
+from discussion.debate import run_debate, stop_debate_async
 
 logger = logging.getLogger(__name__)
 
@@ -86,10 +87,13 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• 直接发消息 - 智能路由到最合适的AI\n"
         "• @Claude / @Codex / @Gemini - 指定AI回答\n"
         "• 同时提及多个AI - 并行调用对比回答\n"
-        "• 讨论(大家/一起) + 技术词(方案/架构) - 触发圆桌讨论\n\n"
+        "• 大家/一起/你们 - 同时调用所有AI\n"
+        "• 圆桌讨论/圆桌会议 - 触发圆桌讨论模式\n"
+        "• 辩论/debate/vs - 触发AI辩论赛\n\n"
         "**命令**\n"
         "/discuss <话题> - 发起AI圆桌讨论\n"
-        "/stop - 终止当前讨论\n"
+        "/debate <辩题> - 发起AI辩论赛\n"
+        "/stop - 终止当前讨论或辩论\n"
         "/sessions - 查看会话状态\n"
         "/clear - 清空会话历史",
         parse_mode='Markdown'
@@ -105,14 +109,36 @@ async def cmd_discuss(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await run_roundtable_discussion(update, context, topic)
 
 
+async def cmd_debate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """处理 /debate 命令 - 发起AI辩论赛"""
+    if not context.args:
+        await update.message.reply_text(
+            "Usage: `/debate <辩题>`\n\n"
+            "示例:\n"
+            "• `/debate AI会取代程序员吗`\n"
+            "• `/debate 远程办公比坐班更高效`\n"
+            "• `/debate 前端框架React vs Vue哪个更好`",
+            parse_mode='Markdown'
+        )
+        return
+    topic = ' '.join(context.args)
+    # 后台运行辩论
+    asyncio.create_task(run_debate(update, context, topic))
+
+
 async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """处理 /stop 命令 - 立即终止讨论和所有AI进程"""
+    """处理 /stop 命令 - 立即终止讨论/辩论和所有AI进程"""
     chat_id = update.effective_chat.id
-    stopped = await stop_discussion_async(chat_id)
-    if stopped:
-        await update.message.reply_text("已停止讨论并终止所有AI进程。")
+
+    # 尝试停止讨论
+    discussion_stopped = await stop_discussion_async(chat_id)
+    # 尝试停止辩论
+    debate_stopped = await stop_debate_async(chat_id)
+
+    if discussion_stopped or debate_stopped:
+        await update.message.reply_text("已停止并终止所有AI进程。")
     else:
-        await update.message.reply_text("当前没有活跃的讨论。")
+        await update.message.reply_text("当前没有活跃的讨论或辩论。")
 
 
 async def cmd_ls(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -228,7 +254,11 @@ async def smart_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
     logger.info(f"Route result: {route_result.route_type.value} -> {route_result.agents} ({route_result.reason}), history_limit={history_limit}")
 
     # 根据路由结果执行
-    if route_result.route_type == RouteType.DISCUSSION:
+    if route_result.route_type == RouteType.DEBATE:
+        # 辩论模式后台运行
+        asyncio.create_task(run_debate(update, context, route_result.cleaned_prompt))
+
+    elif route_result.route_type == RouteType.DISCUSSION:
         # 讨论模式暂不传历史（讨论本身就是多轮）
         # 讨论模式也改为后台运行，防止长时间占用
         asyncio.create_task(run_roundtable_discussion(update, context, route_result.cleaned_prompt))
