@@ -12,7 +12,7 @@ from typing import Optional, Tuple, Dict, List
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from config import AGENTS, PROJECT_ROOT
+from config import AGENTS, PROJECT_ROOT, get_available_agents, normalize_agent_name
 from utils import md_escape, safe_send_message, handle_file_write_requests
 from session import (
     clear_chat_sessions, get_session_id,
@@ -116,6 +116,9 @@ def format_history_context(history: list) -> str:
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理 /start 命令"""
+    available = get_available_agents()
+    available_str = ', '.join(available)
+
     await update.message.reply_text(
         "**Welcome to Agora**\n"
         "多AI协作平台 - Claude / Codex / Gemini\n\n"
@@ -131,7 +134,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/debate <辩题> - 发起AI辩论赛\n"
         "/stop - 终止当前讨论或辩论\n"
         "/sessions - 查看会话状态\n"
-        "/clear - 清空会话历史",
+        "/clear - 清空会话历史\n\n"
+        "**辩论角色指定**\n"
+        f"可用AI: {available_str}\n"
+        "`/debate 辩题 --pro=AI --con=AI --judge=AI`\n"
+        "例: `/debate AI取代程序员 --pro=Gemini --con=Claude`",
         parse_mode='Markdown'
     )
 
@@ -145,21 +152,91 @@ async def cmd_discuss(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await run_roundtable_discussion(update, context, topic)
 
 
+def _parse_debate_args(args: list) -> Tuple[str, Optional[str], Optional[str], Optional[str]]:
+    """
+    解析辩论命令参数
+
+    Args:
+        args: 命令参数列表
+
+    Returns:
+        (辩题, 正方AI, 反方AI, 裁判AI)
+    """
+    topic_parts = []
+    pro_agent = None
+    con_agent = None
+    judge_agent = None
+
+    for arg in args:
+        # 解析 --pro=xxx 格式
+        if arg.startswith('--pro='):
+            pro_agent = arg[6:]
+        elif arg.startswith('--con='):
+            con_agent = arg[6:]
+        elif arg.startswith('--judge='):
+            judge_agent = arg[8:]
+        else:
+            topic_parts.append(arg)
+
+    topic = ' '.join(topic_parts)
+    return topic, pro_agent, con_agent, judge_agent
+
+
 async def cmd_debate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理 /debate 命令 - 发起AI辩论赛"""
+    available = get_available_agents()
+    available_str = ', '.join(available)
+
     if not context.args:
         await update.message.reply_text(
-            "Usage: `/debate <辩题>`\n\n"
-            "示例:\n"
+            "Usage: `/debate <辩题> [--pro=AI] [--con=AI] [--judge=AI]`\n\n"
+            "**基本用法:**\n"
             "• `/debate AI会取代程序员吗`\n"
-            "• `/debate 远程办公比坐班更高效`\n"
-            "• `/debate 前端框架React vs Vue哪个更好`",
+            "• `/debate 远程办公比坐班更高效`\n\n"
+            "**指定角色:**\n"
+            f"• `/debate 辩题 --pro=Claude --con=Gemini --judge=Codex`\n\n"
+            f"**可用AI:** {available_str}",
             parse_mode='Markdown'
         )
         return
-    topic = ' '.join(context.args)
+
+    # 解析参数
+    topic, pro_input, con_input, judge_input = _parse_debate_args(context.args)
+
+    if not topic.strip():
+        await update.message.reply_text("请提供辩题。")
+        return
+
+    # 验证并规范化AI名称
+    pro_agent = None
+    con_agent = None
+    judge_agent = None
+    errors = []
+
+    if pro_input:
+        pro_agent = normalize_agent_name(pro_input)
+        if not pro_agent:
+            errors.append(f"正方AI '{pro_input}' 不存在")
+
+    if con_input:
+        con_agent = normalize_agent_name(con_input)
+        if not con_agent:
+            errors.append(f"反方AI '{con_input}' 不存在")
+
+    if judge_input:
+        judge_agent = normalize_agent_name(judge_input)
+        if not judge_agent:
+            errors.append(f"裁判AI '{judge_input}' 不存在")
+
+    if errors:
+        await update.message.reply_text(
+            f"参数错误:\n• " + "\n• ".join(errors) +
+            f"\n\n可用AI: {available_str}"
+        )
+        return
+
     # 后台运行辩论
-    asyncio.create_task(run_debate(update, context, topic))
+    asyncio.create_task(run_debate(update, context, topic, pro_agent, con_agent, judge_agent))
 
 
 async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):

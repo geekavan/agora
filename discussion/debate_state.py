@@ -41,17 +41,24 @@ class DebateState:
         "judgment": "评委裁决"
     }
 
-    def __init__(self, topic: str, chat_id: int):
+    def __init__(
+        self,
+        topic: str,
+        chat_id: int,
+        pro_agent: Optional[str] = None,
+        con_agent: Optional[str] = None,
+        judge_agent: Optional[str] = None
+    ):
         self.topic = topic
         self.chat_id = chat_id
         self.phase = "opening"          # 当前阶段
         self.round = 0                  # 自由辩论轮次
         self.stopped = False            # 是否被停止
 
-        # 角色分配
-        self.pro_agent = DEBATE_ROLES["pro"]    # 正方
-        self.con_agent = DEBATE_ROLES["con"]    # 反方
-        self.judge_agent = DEBATE_ROLES["judge"]  # 评委
+        # 角色分配（如果用户未指定，使用默认配置）
+        self.pro_agent = pro_agent or DEBATE_ROLES["pro"]      # 正方
+        self.con_agent = con_agent or DEBATE_ROLES["con"]      # 反方
+        self.judge_agent = judge_agent or DEBATE_ROLES["judge"]  # 评委
 
         # 发言记录
         self.arguments: List[DebateArgument] = []

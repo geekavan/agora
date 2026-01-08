@@ -108,6 +108,30 @@ DEBATE_SCORING_DIMENSIONS = [
 ]
 
 
+# ============= 辅助函数 =============
+
+def get_available_agents() -> list:
+    """获取可用的AI列表"""
+    return list(AGENTS.keys())
+
+
+def normalize_agent_name(name: str) -> str | None:
+    """
+    规范化AI名称（大小写不敏感匹配）
+
+    Args:
+        name: 用户输入的AI名称
+
+    Returns:
+        规范化后的AI名称，如果未找到则返回None
+    """
+    name_lower = name.lower()
+    for agent_name in AGENTS.keys():
+        if agent_name.lower() == name_lower:
+            return agent_name
+    return None
+
+
 # ============= 配置验证 =============
 
 def validate_config() -> list:

@@ -83,9 +83,21 @@ async def _send_agent_response(
 async def run_debate(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
-    topic: str
+    topic: str,
+    pro_agent: str = None,
+    con_agent: str = None,
+    judge_agent: str = None
 ):
-    """运行辩论"""
+    """运行辩论
+
+    Args:
+        update: Telegram update
+        context: Telegram context
+        topic: 辩题
+        pro_agent: 正方AI（可选，默认使用配置）
+        con_agent: 反方AI（可选，默认使用配置）
+        judge_agent: 评委AI（可选，默认使用配置）
+    """
     chat_id = update.effective_chat.id
 
     # 使用锁保护全局状态的读写
@@ -95,7 +107,7 @@ async def run_debate(
             return
 
         # 初始化辩论状态
-        debate = DebateState(topic, chat_id)
+        debate = DebateState(topic, chat_id, pro_agent, con_agent, judge_agent)
         active_debates[chat_id] = debate
         cancel_event = asyncio.Event()
         debate_cancel_events[chat_id] = cancel_event
