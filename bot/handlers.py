@@ -7,7 +7,7 @@ import os
 import re
 import asyncio
 import logging
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, List
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -27,6 +27,42 @@ logger = logging.getLogger(__name__)
 
 # 默认传递的历史条数
 DEFAULT_HISTORY_LIMIT = 2
+
+# 连续消息合并窗口（秒）
+MESSAGE_COMBINE_WINDOW = 1.0
+
+# 待合并消息缓存与任务
+_message_buffers: Dict[int, List[str]] = {}
+_message_buffer_tasks: Dict[int, asyncio.Task] = {}
+_message_buffer_lock = asyncio.Lock()
+
+
+async def _flush_message_buffer(
+    chat_id: int,
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+    async with _message_buffer_lock:
+        parts = _message_buffers.pop(chat_id, [])
+        _message_buffer_tasks.pop(chat_id, None)
+
+    combined_text = "\n".join([part for part in parts if part and part.strip()]).strip()
+    if not combined_text:
+        return
+
+    await _handle_combined_message(update, context, combined_text)
+
+
+async def _debounced_flush(
+    chat_id: int,
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+    try:
+        await asyncio.sleep(MESSAGE_COMBINE_WINDOW)
+        await _flush_message_buffer(chat_id, update, context)
+    except asyncio.CancelledError:
+        pass
 
 
 def parse_history_limit(message: str) -> Tuple[str, int]:
@@ -225,11 +261,36 @@ async def smart_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
     支持 --N 参数指定历史条数，例如:
     --5 codex帮我看看 → 传递最近5条历史给codex
+    连续1秒内的多条消息会被自动合并处理
     """
     if not update.message or not update.message.text:
         return
 
     text = update.message.text
+    if text.startswith("/"):
+        return
+
+    chat_id = update.effective_chat.id
+
+    async with _message_buffer_lock:
+        buffer = _message_buffers.setdefault(chat_id, [])
+        buffer.append(text)
+
+        pending = _message_buffer_tasks.get(chat_id)
+        if pending and not pending.done():
+            pending.cancel()
+
+        _message_buffer_tasks[chat_id] = asyncio.create_task(
+            _debounced_flush(chat_id, update, context)
+        )
+
+
+async def _handle_combined_message(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    text: str
+):
+    """处理合并后的消息内容"""
     chat_id = update.effective_chat.id
 
     # 解析 --N 历史条数参数
@@ -307,8 +368,6 @@ async def call_single_agent(
     chat_id = update.effective_chat.id
 
     try:
-        role = AGENTS[agent]["role"]
-
         # 构建上下文部分
         context_parts = []
 
@@ -329,7 +388,7 @@ async def call_single_agent(
         context_section = "\n".join(context_parts)
 
         full_prompt = (
-            f"You are {agent} ({role}).\n"
+            f"You are {agent}.\n"
             "If you need to write a file, use the format: <WRITE_FILE path=\"path/to/file\">file content</WRITE_FILE>\n"
             "Keep concise.\n\n"
             f"{context_section}"

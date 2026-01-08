@@ -107,10 +107,8 @@ async def _wait_for_tasks_with_cancel(
 
 def build_proposal_prompt(agent: str, topic: str, round_num: int, base_proposal: str = "", project_context: str = "") -> str:
     """构建提案prompt"""
-    role = AGENTS[agent]["role"]
-
     if round_num == 1:
-        return f"""你是 {agent} ({role})。
+        return f"""你是 {agent}。
 
 {project_context}
 
@@ -118,11 +116,11 @@ def build_proposal_prompt(agent: str, topic: str, round_num: int, base_proposal:
 {topic}
 
 【任务】
-请基于你的专业视角（{role}），对上述议题进行深入分析、点评或提出解决方案。
+请从你认为合适的角度，对上述议题进行深入分析、点评或提出解决方案。
 不需要局限于“技术方案”，如果是代码则进行Review，如果是问题则分析原因。
 请直接输出你的核心观点或分析结果。"""
     else:
-        return f"""你是 {agent} ({role})。
+        return f"""你是 {agent}。
 
 【议题】
 {topic}
@@ -131,7 +129,7 @@ def build_proposal_prompt(agent: str, topic: str, round_num: int, base_proposal:
 {base_proposal}
 
 【任务】
-参考上述内容，结合你的专业视角，进行补充、修正或提出进一步的分析。
+参考上述内容，结合你的理解，进行补充、修正或提出进一步的分析。
 你可以：
 1. 指出上述观点中被忽视的问题（如安全、性能、架构缺陷）
 2. 提供具体的实现细节或改进建议
@@ -142,9 +140,11 @@ def build_proposal_prompt(agent: str, topic: str, round_num: int, base_proposal:
 
 def build_review_prompt(reviewer: str, topic: str, proposals_text: str) -> str:
     """构建评审prompt"""
-    role = AGENTS[reviewer]["role"]
+    format_sections = "\n\n".join(
+        [f"## {agent} 的观点\n<SCORE>85</SCORE>\n点评：xxx" for agent in AGENTS.keys()]
+    )
 
-    return f"""你是 {reviewer} ({role})，请评审以下观点或方案。
+    return f"""你是 {reviewer}，请评审以下观点或方案。
 
 【议题】
 {topic}
@@ -153,21 +153,11 @@ def build_review_prompt(reviewer: str, topic: str, proposals_text: str) -> str:
 {proposals_text}
 
 【任务】
-基于你的专业视角，对每个观点的**质量、准确性和价值**进行评分(0-100)并给出简短点评。
+对每个观点的**质量、准确性和价值**进行评分(0-100)并给出简短点评。
 
 【输出格式】严格按以下格式，每个对象一个：
 
-## Claude 的观点
-<SCORE>85</SCORE>
-点评：xxx
-
-## Gemini 的观点
-<SCORE>78</SCORE>
-点评：xxx
-
-## Codex 的观点
-<SCORE>90</SCORE>
-点评：xxx
+{format_sections}
 
 ⚠️ 注意：<SCORE>标签内只写数字。
 

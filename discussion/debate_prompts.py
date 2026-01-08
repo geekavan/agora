@@ -2,16 +2,15 @@
 辩论模式 Prompt 模板
 """
 
-from config import AGENTS, DEBATE_SCORING_DIMENSIONS
+from config import DEBATE_SCORING_DIMENSIONS
 
 
 def build_opening_prompt(agent: str, topic: str, side: str) -> str:
     """构建开场陈述 Prompt"""
-    role = AGENTS[agent]["role"]
     stance = "支持" if side == "pro" else "反对"
     stance_label = "正方" if side == "pro" else "反方"
 
-    return f"""你是 {agent} ({role})，在一场正式辩论中担任【{stance_label}】。
+    return f"""你是 {agent}，在一场正式辩论中担任【{stance_label}】。
 
 【辩题】
 {topic}
@@ -36,11 +35,10 @@ def build_opening_prompt(agent: str, topic: str, side: str) -> str:
 
 def build_cross_exam_prompt(agent: str, topic: str, side: str, opponent_statement: str) -> str:
     """构建质询 Prompt"""
-    role = AGENTS[agent]["role"]
     stance_label = "正方" if side == "pro" else "反方"
     opponent_label = "反方" if side == "pro" else "正方"
 
-    return f"""你是 {agent} ({role})，辩论中的【{stance_label}】。
+    return f"""你是 {agent}，辩论中的【{stance_label}】。
 
 【辩题】
 {topic}
@@ -66,10 +64,9 @@ def build_cross_exam_prompt(agent: str, topic: str, side: str, opponent_statemen
 
 def build_response_prompt(agent: str, topic: str, side: str, questions: str) -> str:
     """构建回应质询 Prompt"""
-    role = AGENTS[agent]["role"]
     stance_label = "正方" if side == "pro" else "反方"
 
-    return f"""你是 {agent} ({role})，辩论中的【{stance_label}】。
+    return f"""你是 {agent}，辩论中的【{stance_label}】。
 
 【辩题】
 {topic}
@@ -96,10 +93,9 @@ def build_response_prompt(agent: str, topic: str, side: str, questions: str) -> 
 def build_free_debate_prompt(agent: str, topic: str, side: str,
                               debate_history: str, round_num: int) -> str:
     """构建自由辩论 Prompt"""
-    role = AGENTS[agent]["role"]
     stance_label = "正方" if side == "pro" else "反方"
 
-    return f"""你是 {agent} ({role})，辩论中的【{stance_label}】。
+    return f"""你是 {agent}，辩论中的【{stance_label}】。
 
 【辩题】
 {topic}
@@ -127,11 +123,10 @@ def build_free_debate_prompt(agent: str, topic: str, side: str,
 
 def build_closing_prompt(agent: str, topic: str, side: str, debate_history: str) -> str:
     """构建总结陈词 Prompt"""
-    role = AGENTS[agent]["role"]
     stance_label = "正方" if side == "pro" else "反方"
     stance = "支持" if side == "pro" else "反对"
 
-    return f"""你是 {agent} ({role})，辩论中的【{stance_label}】。
+    return f"""你是 {agent}，辩论中的【{stance_label}】。
 
 【辩题】
 {topic}
@@ -158,12 +153,10 @@ def build_closing_prompt(agent: str, topic: str, side: str, debate_history: str)
 
 def build_judgment_prompt(judge: str, topic: str, full_transcript: str) -> str:
     """构建评委裁决 Prompt"""
-    role = AGENTS[judge]["role"]
-
     # 构建评分维度说明
     dimensions_text = "\n".join([f"- **{dim}**" for dim in DEBATE_SCORING_DIMENSIONS])
 
-    return f"""你是 {judge} ({role})，担任本场辩论的【评委】，请做出公正裁决。
+    return f"""你是 {judge}，担任本场辩论的【评委】，请做出公正裁决。
 
 【辩题】
 {topic}

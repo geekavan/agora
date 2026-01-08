@@ -253,9 +253,9 @@ class SmartRouter:
         route_prompt = f"""你是一个AI路由器。根据用户的问题，判断应该由哪个AI来回答。
 
 可选的AI：
-- Claude: 架构设计、方案分析、复杂问题
-- Codex: 代码编写、实现功能、开发任务
-- Gemini: 代码审查、测试、安全检查
+- Claude: 架构与方案、综合分析
+- Codex: 代码实现、工程细节
+- Gemini: 观点补充、对比分析、问题发现
 
 用户问题: {message}
 

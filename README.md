@@ -62,20 +62,20 @@ agora
 - **讨论状态管理** - 支持停止、导出等控制命令
 - **模块化架构** - 清晰的代码分层，易于扩展和维护
 
-## 🤖 AI角色
+## 🤖 AI参与者
 
-| AI | 角色 | 专长 |
-|------|------|------|
-| 🔸 **Claude** | 架构师 & 主审查员 | 系统设计、架构规划、深度分析、智能路由 |
-| ❇️ **Codex** | 首席开发工程师 | 代码实现、算法优化 |
-| 💠 **Gemini** | QA & 安全专家 | 代码审查、安全检测、质量把关 |
+| AI | 说明 |
+|------|------|
+| 🔸 **Claude** | 结构化分析与统筹 |
+| ❇️ **Codex** | 代码实现与工程细节 |
+| 💠 **Gemini** | 多角度补充与问题发现 |
 
 ## 📁 项目结构
 
 ```
 agora/
 ├── main.py                 # 程序入口
-├── config.py               # 配置管理（AI角色、讨论参数、路由关键词）
+├── config.py               # 配置管理（AI配置、讨论参数、路由关键词）
 ├── agents/                 # AI Agent 模块
 │   ├── runner.py           # Agent 执行器（会话管理、命令执行）
 │   └── router.py           # 智能路由（意图识别、Agent选择）
@@ -369,7 +369,7 @@ Gemini: 没问题，方案可行
 
 → Claude: 从组织架构和沟通成本角度分析...
 → Codex: 从工程效率和工具链角度补充...
-→ Gemini: 从数据安全和合规性角度提出担忧...
+→ Gemini: 从另一角度提出补充或质疑...
 → 三方互补，形成全面的分析报告
 ```
 
@@ -392,7 +392,6 @@ CONVERGENCE_DELTA = 5             # 收敛增幅阈值（连续2轮提升小于�
 ```python
 AGENTS = {
     "Claude": {
-        "role": "Architect & Lead Reviewer",
         "emoji": "🔸",
         "command_template": ["claude", "-p", "--dangerously-skip-permissions", "--resume", "{session_id}"],
         "create_command": ["claude", "-p", "--dangerously-skip-permissions", "--session-id", "{session_id}"],
@@ -400,18 +399,17 @@ AGENTS = {
         "is_router": True,  # Claude 作为默认路由AI
     },
     "Codex": {
-        "role": "Lead Developer",
         "emoji": "❇️",
-        "command_template": ["codex", "exec", "resume", "{session_id}"],
+        "command_template": ["codex", "exec", "--skip-git-repo-check", "resume", "{session_id}"],
         "create_command": ["codex", "exec", "--skip-git-repo-check", "--full-auto"],
         "needs_uuid": False,
     },
     "Gemini": {
-        "role": "QA & Security Expert",
         "emoji": "💠",
         "command_template": ["gemini", "--resume", "{session_id}", "-y", "-p"],
         "create_command": ["gemini", "-y", "-p"],
         "needs_uuid": False,
+        "needs_stdin_close": True,
     }
 }
 ```

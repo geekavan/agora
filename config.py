@@ -22,7 +22,6 @@ PROXY_URL = os.getenv("PROXY_URL", None)
 
 AGENTS = {
     "Claude": {
-        "role": "Architect & Lead Reviewer",
         "emoji": "🔸",
         "command_template": ["claude", "-p", "--dangerously-skip-permissions", "--resume", "{session_id}"],
         "create_command": ["claude", "-p", "--dangerously-skip-permissions", "--session-id", "{session_id}"],
@@ -30,14 +29,12 @@ AGENTS = {
         "is_router": True,  # Claude 作为默认路由AI
     },
     "Codex": {
-        "role": "Lead Developer",
         "emoji": "❇️",
         "command_template": ["codex", "exec", "--skip-git-repo-check", "resume", "{session_id}"],
         "create_command": ["codex", "exec", "--skip-git-repo-check", "--full-auto"],
         "needs_uuid": False,
     },
     "Gemini": {
-        "role": "QA & Security Expert",
         "emoji": "💠",
         "command_template": ["gemini", "--resume", "{session_id}", "-y", "-p"],
         "create_command": ["gemini", "-y", "-p"],
@@ -94,9 +91,9 @@ DEBATE_KEYWORDS = [
 
 # 辩论角色分配
 DEBATE_ROLES = {
-    "pro": "Claude",     # 正方 - 擅长系统论证
-    "con": "Gemini",     # 反方 - 擅长质疑审视
-    "judge": "Codex"     # 评委 - 中立评判
+    "pro": "Claude",     # 正方
+    "con": "Gemini",     # 反方
+    "judge": "Codex"     # 评委
 }
 
 # 自由辩论轮数

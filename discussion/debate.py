@@ -21,7 +21,7 @@ from .debate_prompts import (
     build_closing_prompt,
     build_judgment_prompt
 )
-from .utils import send_phase_header, check_cancelled
+from .utils import send_phase_header
 
 logger = logging.getLogger(__name__)
 
